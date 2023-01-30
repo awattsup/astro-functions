@@ -1,0 +1,801 @@
+import numpy as np
+import math 
+from math import gcd
+import matplotlib.pyplot as plt
+from astropy.io import fits
+from astropy.wcs import WCS, Wcsprm
+from astropy import units as u
+try:
+	from spectral_cube import SpectralCube
+except:
+	print('no spectral cube installed')
+try:
+	import requests
+	from io import BytesIO
+	from PIL import Image
+except:
+	print('cant get SDSS images')
+
+import copy
+from scipy.stats import ks_2samp,anderson_ksamp
+import scipy.stats as sps
+from scipy.stats import distributions
+
+rng = np.random.default_rng()
+
+
+def inside_polygon(coordinates, poly_x, poly_y):
+	#inspired by /copied from  the IDL-coyote routine 'inside'
+	Npoly = len(poly_x)
+	Ncoords = len(coordinates[:,0])
+
+	poly_x = np.append(poly_x,poly_x[0])					#close polygon
+	poly_y = np.append(poly_y,poly_y[0])
+	
+	theta_arr = np.zeros(Ncoords)
+	for ii in range(Ncoords):
+
+		vec1_x = poly_x[0:-1] - coordinates[ii,0] 				#verticies 0 -> N-1
+		vec1_y = poly_y[0:-1] - coordinates[ii,1]
+
+		vec2_x = poly_x[1::] - coordinates[ii,0]					#vertices 1 -> N
+		vec2_y = poly_y[1::] - coordinates[ii,1]
+
+		dot_prod = vec1_x * vec2_x + vec1_y * vec2_y
+		cross_prod = vec1_x * vec2_y - vec1_y * vec2_x
+
+		theta = np.arctan(cross_prod/ dot_prod)
+		for tt in range(len(theta)):
+			if np.sign(dot_prod[tt]) == -1:
+				theta[tt] += np.sign(cross_prod[tt])*np.pi
+
+		theta_arr[ii] = np.sum(theta)
+
+
+
+	# plt.imshow((theta_arr/np.pi).reshape((442,439)))
+	# plt.show()
+	# exit()
+
+	in_polygon = np.where(np.abs(theta_arr) > 5)[0]					#get total of angles. will be near 2pi if in polygon
+
+	return in_polygon
+
+
+def get_SDSS_image(RA, DEC, arcsec=90, RADEC=False,head=False):
+	
+
+	img_scale = 0.36
+	if isinstance(arcsec,list):
+		img_size = [int(arcsec[0]/img_scale),int(arcsec[1]/img_scale)] *2
+	else:
+		img_size = [int(arcsec/img_scale)] *2
+
+
+	imgURL = f'http://skyservice.pha.jhu.edu/DR9/ImgCutout/getjpeg.aspx?ra={RA}&dec={DEC}&width={img_size[0]}&height={img_size[1]}&scale={img_scale}'
+	response = requests.get(imgURL)
+	img = Image.open(BytesIO(response.content))
+
+	if RADEC:
+		CDELT1 = -img_scale/3600.
+		CDELT2 = img_scale/3600.
+		NAXIS1 = img_size[0]
+		NAXIS2 = img_size[1]
+		CRPIX1 = NAXIS1/2
+		CRPIX2 = NAXIS2/2
+		CRVAL1 = RA
+		CRVAL2 = DEC
+
+		w = WCS(naxis=2)
+		w.wcs.crpix = [CRPIX1,CRPIX2]
+		w.wcs.cdelt = [CDELT1,CDELT2]
+		w.wcs.crval = [CRVAL1,CRVAL2]
+		w.wcs.ctype=["RA---SIN","DEC--SIN"]
+
+		h = w.to_header()
+		h['NAXIS1'] = NAXIS1
+		h['NAXIS2'] = NAXIS2
+
+		pix_xxyy, pix_RADEC, pix_SP = make_pix_WCS_grids(h)
+
+		if head:
+			return img, [pix_xxyy, pix_RADEC, pix_SP], h
+		else:
+			return img, [pix_xxyy, pix_RADEC, pix_SP]
+			
+
+	else:
+
+		return img
+
+
+def im_fetch(outfile, RA, DEC):
+    """Fetch the image at the given RA, DEC from the Legacy server"""
+    #top_level_url = ("https://www.legacysurvey.org/viewer/jpeg-cutout?ra=%s&dec=%s&zoom=14&layer=decals-dr7&width=1000&height=1000" % (RA, DEC)) # was 240x240For Legacy survey imaging .262"/pix. So 20' will be 4580 pix! Was 240
+    top_level_url_fits = ("https://www.legacysurvey.org/viewer/fits-cutout/?ra=%s&dec=%s&layer=ls-dr9&width=1000&height=1000&pixscale=0.262&bands=r" % (RA, DEC)) # For the r-band fits images.
+    #top_level_url_fits_cutout = ("https://www.legacysurvey.org/viewer/fits-cutout/?ra=%s&dec=%s&pixscale=0.5&layer=ls-dr9&size=3000&bands=g" % (RA, DEC)) # For the r-band fits images.
+    #top_level_url = ("http://skyservice.pha.jhu.edu/DR12/ImgCutout/getjpeg.aspx?ra=%.8f&dec=%.8f&scale=0.2&width=400&height=400" % (RA, DEC)) # For SDSS
+    r = requests.get(top_level_url_fits)
+    if r.ok:
+        with open(outfile, 'wb') as file:
+            file.write(r.content)
+    else:
+        print('No coverage for (%s, %s)' % (RA, DEC))
+
+def make_pix_WCS_grids_old(header):
+		
+	wcs =  WCS(header).celestial
+	
+	Nx = header['NAXIS1']
+	Ny = header['NAXIS2']
+
+	pix_xx, pix_yy = np.meshgrid(np.arange(Nx),np.arange(Ny),indexing='xy') #Naxis2=rows,Naxis1=cols
+
+
+	if method == 'astropy':
+		pix_RADEC = wcs.pixel_to_world(pix_xx.flatten(),pix_yy.flatten())
+		pix_RA = np.asarray(pix_RADEC.ra.deg).reshape(Ny,Nx)
+		pix_DEC = np.asarray(pix_RADEC.dec.deg).reshape(Ny,Nx)
+
+
+	pix_xxyy = [pix_xx,pix_yy]
+	pix_RADEC = [pix_RA,pix_DEC]
+
+	return pix_xxyy, pix_RADEC
+
+
+def make_pix_WCS_grids(header):
+	wcs =  WCS(header).celestial
+	Nx = header['NAXIS1']
+	Ny = header['NAXIS2']
+
+
+	#pixel coordinates .. Naxis2=rows,Naxis1=cols, FITS begins at 1
+	pix_xx, pix_yy = np.meshgrid(np.arange(Nx,dtype=int) + 1,
+							np.arange(Ny,dtype=int) + 1,
+							indexing='xy') 
+
+	pix_xxyy = [pix_xx.flatten(),pix_yy.flatten()]
+
+
+	#pixel RA + DEC
+	pix_radec = wcs.all_pix2world(np.column_stack([pix_xx.flatten(),
+													pix_yy.flatten()]),1)
+	pix_RA = pix_radec[:,0]
+	pix_DEC = pix_radec[:,1]
+	pix_RADEC = [pix_RA,pix_DEC]
+
+
+	#get "corrected" pixel coordinates by reversing transform using core WCS lib only
+	# after all possible distortions have been applied. Technically "corrected intermediate pixel corrdinates")
+	#but in the frame of "corrected world coordinates", which I think translates to
+	#the focal plane. see Calabretta+04. Projection to sky plane and world coords are then 'simple'
+	pix_foc = wcs.wcs_world2pix(pix_radec,1)
+	wcsprm = Wcsprm(str(header).encode()).sub(['celestial'])
+	out = wcsprm.p2s(pix_foc,1)
+	pix_SPxx = np.asarray(out['imgcrd'])[:,0]
+	pix_SPyy = np.asarray(out['imgcrd'])[:,1]
+	pix_SP = [pix_SPxx,pix_SPyy]
+	#intermediate world coordinates ['imgcrd'].. ['world'] gives RA+Dec as ^ 
+
+
+
+	# #do as simpler grid
+	# PCi_j = wcs.wcs.pc
+	# CDELT = wcs.wcs.cdelt
+	# CRPIX = wcs.wcs.crpix
+	# pix_SPxx = PCi_j[0,0]*(pix_xx.flatten() - CRPIX[0]) + PCi_j[0,1]*(pix_yy.flatten() - CRPIX[1])
+	# pix_SPyy = PCi_j[1,0]*(pix_xx.flatten() - CRPIX[0]) + PCi_j[1,1]*(pix_yy.flatten() - CRPIX[1])
+	# pix_SPxx *= CDELT[0]
+	# pix_SPyy *= CDELT[1]
+	# pix_SP = [pix_SPxx,pix_SPyy]
+
+
+
+	# # just an RA & DEC test
+	# test1 = np.asarray(out['world'])[:,0]
+	# test2 = np.asarray(out['world'])[:,1]
+	# print(pix_RA - test1)
+	# print(np.nanmean(pix_RA - test1),np.std(pix_RA - test1))
+	# exit()
+
+
+	# # just an SPxxyy test
+	# test1 = np.asarray(out['imgcrd'])[:,0]
+	# test2 = np.asarray(out['imgcrd'])[:,1]
+	# print(pix_SPxxyy1[:,0] - pix_SPxx)
+	# print(np.nanmean(pix_RA - test1),np.std(pix_RA - test1))
+	# exit()
+
+
+	return  pix_xxyy, pix_RADEC, pix_SP
+
+def get_wavelength_axis(header, units=1.e10):
+	
+	wcs =  WCS(header)
+	pix_WAV = units*np.asarray(wcs.sub([3]).pixel_to_world(np.arange(header['NAXIS3'])))
+
+	return pix_WAV
+
+def convert_skyplane_to_RADEC(pix_SP,header):
+	#astropy doesnt support sky-plane -> RA/DEC, so this has to be a little manual
+	wcs = WCS(header).celestial
+
+	CDELT = wcs.wcs.cdelt
+	CRPIX = wcs.wcs.crpix
+
+	pix_foc_xx = pix_SP[:,0]/CDELT[0] + CRPIX[0]
+	pix_foc_yy = pix_SP[:,1]/CDELT[1] + CRPIX[1]
+
+	pix_RADEC = wcs.wcs_pix2world(np.column_stack([pix_foc_xx,pix_foc_yy]),1)
+
+	return pix_RADEC
+
+def convert_RADEC_to_skyplane(pix_RADEC,header):
+	#astropy doesnt support RA/DEC -> sky-plane, so this has to be a little manual
+	#wcsprm only deals with core WCS transforms
+	wcsprm = Wcsprm(str(header).encode()).sub(['celestial'])
+
+	pix_SP = wcsprm.s2p(pix_RADEC,1)['imgcrd']
+
+
+	return pix_SP
+
+
+def make_WCSregion_polygon(region_file):
+
+	# region_file = '/home/awatts/projects/MUSEdemo/regs.reg'
+
+	f = open(region_file,'r')
+	line1 = f.readline()
+
+	if 'DS9' in line1:
+		region_type = 'DS9'
+
+	elif 'CRTF' in  line1:
+		region_type = 'CARTA'
+	
+	polygons = []
+	for line in f:
+		if region_type == 'CARTA':
+			linesplit = line.split(' ')
+			shape = linesplit[0]
+			RA = float(linesplit[1].split('[')[-1].split('deg,')[0])
+			DEC = float(linesplit[2].split('deg],')[0])
+			Rmaj = float(linesplit[3].split('[')[-1].split('arcsec,')[0])
+			Rmin = float(linesplit[4].split('arcsec],')[0])
+			PA = float(linesplit[5].split('deg]')[0])
+
+			Rmaj_deg = Rmaj / 3600.
+			Rmin_deg = Rmin / 3600.
+			if shape == 'ellipse':
+				phi = np.linspace(0,2*np.pi,360)
+				xx = Rmaj_deg*np.cos(phi)
+				yy =  Rmin_deg*np.sin(phi)
+			
+			elif shape == 'rotbox':
+				xx = np.array([0.5*Rmaj_deg,0.5*Rmaj_deg,-0.5*Rmaj_deg,
+								-0.5*Rmaj_deg])
+				yy = np.array([-0.5*Rmin_deg,0.5*Rmin_deg,0.5*Rmin_deg,
+								-0.5*Rmin_deg])
+
+		xx_wcs = RA + xx*np.cos(-PA*np.pi/180.) - yy*np.sin(-PA*np.pi/180.)
+		yy_wcs = DEC + xx*np.sin(-PA*np.pi/180.) + yy*np.cos(-PA*np.pi/180.)
+
+		poly = [xx_wcs,yy_wcs]
+		polygons.append(poly)
+			
+	f.close()
+
+
+	return polygons
+
+
+def get_WCSregion_spectrum(datacube, region_file):
+	# 
+	# datacube = '/home/awatts/projects/MUSEdemo/ADP.2016-07-25T13_16_34.364.fits'
+	# region_file = '/home/awatts/projects/MUSEdemo/regs.reg'
+
+
+	hdul = fits.open(datacube)
+	head = hdul[1].header
+	data = hdul[1].data
+	wcs = WCS(head)
+
+	hdul.close()
+
+	pix_AA = get_wavelength_axis(head)
+
+
+	if region_file == 'all':
+		spectra = np.zeros([len(pix_AA),2])
+
+		spectra[:,0] = pix_AA
+		spectra[:,1] = np.nansum(data, axis=(1,2))
+			
+
+	else:
+		region_polygons = make_WCSregion_polygon(region_file)
+		
+		pix_xxyy, pix_RADEC = make_pix_WCS_grids(head)
+
+
+		# RA_pix = (np.arange(head['NAXIS1']) - head['CRPIX1'])*head['CD1_1'] + head['CRVAL1']
+		# DEC_pix = (np.arange(head['NAXIS2']) - head['CRPIX2'])*head['CD2_2'] + head['CRVAL2']
+
+		# RA_mesh,DEC_mesh = np.meshgrid(RA_pix,DEC_pix)
+		# xxpix_mesh,yypix_mesh = np.meshgrid(np.arange(head['NAXIS1']),np.arange(head['NAXIS2']))
+
+
+		pix_RADEC_flat = np.array([pix_RADEC[0].flatten(),pix_RADEC[1].flatten()]).T
+		pix_xx_flat = pix_xxyy[0].flatten()
+		pix_yy_flat = pix_xxyy[1].flatten()
+
+		spectra = np.zeros([len(pix_AA),len(region_polygons)+1])
+		spectra[:,0] = pix_AA
+		for ii in range(len(region_polygons)):
+			polygon = region_polygons[ii]
+			in_poly = inside_polygon(pix_RADEC_flat,polygon[0],polygon[1])
+
+			region_spectrum = np.nansum(data[:,pix_yy_flat[in_poly],pix_xx_flat[in_poly]],axis=1)
+
+			spectra[:,ii+1] = region_spectrum
+
+	header=None
+	data=None
+	
+	return spectra
+
+def extract_subcube(datacube,subcube_index,filepath = True,hdu=0):
+
+	if filepath:
+		cube = SpectralCube.read(datacube,hdu=hdu)
+	elif not filepath:
+		cube = SpectralCube(data=datacube[0],wcs=datacube[1])
+
+	if subcube_index[0]=='all':
+		subcube = cube[:,
+					subcube_index[1][0]:subcube_index[1][1],
+					subcube_index[2][0]:subcube_index[2][1]]
+	else:
+		subcube = cube[subcube_index[0][0]:subcube_index[0][1],
+					subcube_index[1][0]:subcube_index[1][1],
+					subcube_index[2][0]:subcube_index[2][1]]
+
+	return subcube
+
+
+
+
+def calculate_HI_mass(Sint,dL):
+
+	MHI = 2.356e5 * dL * dL * Sint
+	return MHI
+
+def Wang16_HIsizemass(logMHI = None, logDHI = None):
+
+	if np.ndim(logMHI)>0 or np.isscalar(logMHI != None):
+		logDHI = 0.506 * logMHI - 3.293
+		return logDHI
+
+	elif np.ndim(logDHI)>0 or np.isscalar(logDHI != None):
+		logMHI = (logDHI + 3.293) / 0.506
+		return logMHI
+	else:
+		print('Incorrect input')
+
+def xGASS_SFMS(lgMstar, sigma=0):
+
+	sSFR = -0.344*(lgMstar - 9) - 9.822
+	
+	sSFR += sigma * (0.088 * (lgMstar-9) + 0.188)
+
+	return sSFR
+
+
+
+def int_Ez(z, omega_M = None, omega_L = None):
+	if omega_M == None:
+		omega_M = 1. - omega_L
+
+	if omega_L == None:
+		omega_L = 1. - omega_M
+
+	dz = 1.e-6
+	zrange = np.arange(0,z,dz)
+	Ez = np.sqrt(omega_M*(1. + zrange)**3.e0 + omega_L)
+	int_Ez = np.nansum(1.e0/Ez)*dz
+	return int_Ez
+
+
+def calculate_luminosity_distance(z,H0 = 70.e0, omega_M = 0.3, omega_L = 0.7):
+	dH = 2.99792e5 / H0
+	dC = dH * int_Ez(z,omega_M,omega_L)
+	dM = dC
+	dL = (1.e0 + z) * dM
+	return dL
+
+
+def ks_test(samp1,samp2,alternative='two sided'):
+
+	result = ks_2samp(samp1,samp2,alternative=alternative)
+
+	return result
+
+def ad_test(samp1,samp2):
+	result =  anderson_ksamp([samp1,samp2])
+
+	return result
+
+def weighted_ks_test(samp1,samp2,weights1 = None,weights2 = None,n1 = None,n2 = None,alternative='two-sided',method='asymp'):
+	#weighted KS-test from https://stackoverflow.com/a/67638913
+	#samp1,2 are data points
+	#weights1, 2 are the weights, set all to 1 if not provided
+	#n1,n2 number of data points in each sample, used to adjust p-value calculation if on sample containes
+		# one data point contributing multiple times (e.g. one N = 250 galaxy used to create mocks for 4 others
+		# should not contribute 1000 points to the significance)
+	if isinstance(weights1,type(None)):
+		weights1 = np.ones(len(samp1))
+
+	if isinstance(weights2,type(None)):
+		weights2 = np.ones(len(samp2))
+
+	samp1_argsort = np.argsort(samp1)
+	samp2_argsort = np.argsort(samp2)
+	samp1 = samp1[samp1_argsort]
+	samp2 = samp2[samp2_argsort]
+	weights1 = weights1[samp1_argsort]
+	weights2 = weights2[samp2_argsort]
+
+	samp_comb = np.hstack([samp1, samp2])
+
+	cumu_weights1 = np.hstack([0, np.cumsum(weights1)/sum(weights1)])
+	cumu_weights2 = np.hstack([0, np.cumsum(weights2)/sum(weights2)])
+
+	cdf1we = cumu_weights1[np.searchsorted(samp1, samp_comb, side='right')]
+	cdf2we = cumu_weights2[np.searchsorted(samp2, samp_comb, side='right')]
+
+	# plt.figure()
+	# plt.plot(cdf1we)
+	# plt.plot(cdf2we)
+	# plt.show()
+
+	if method == 'asymp':
+		d = np.max(np.abs(cdf1we - cdf2we))
+		# calculate p-value
+		if isinstance(n1,type(None)):
+			n1 = samp1.shape[0]
+		if isinstance(n2,type(None)):
+			n2 = samp2.shape[0]
+
+		m, n = sorted([float(n1), float(n2)], reverse=True)
+		en = m * n / (m + n)
+		if alternative == 'two-sided':
+			prob = distributions.kstwo.sf(d, np.round(en))
+		else:
+			z = np.sqrt(en) * d
+			# Use Hodges' suggested approximation Eqn 5.3
+			# Requires m to be the larger of (n1, n2)
+			expt = -2 * z**2 - 2 * z * (m + 2*n)/np.sqrt(m*n*(m+n))/3.0
+			prob = np.exp(expt)
+		return [d, prob]
+
+
+def weighted_moment(data,weights=None,moment = 1):
+
+	if isinstance(weights,type(None)):
+		weights = np.ones_like(data)
+
+	if moment >= 1:
+		moment1 =  np.sum(data*weights) / np.sum(weights)
+		mom = moment1
+
+	if moment >= 2:
+		moment2 = np.sum(weights*(data - moment1)**2) / np.sum(weights)
+		moment2 = np.sqrt(moment2)
+		mom = moment2
+
+	if moment == 3:
+		mom = np.sum(weights * ((data - moment1) / moment2)**3) / np.sum(weights)
+
+	if moment == 4:
+		mom = np.sum(weights * ((data - moment1) / moment2)**4) / np.sum(weights) - 3
+
+
+	
+	return mom	
+
+
+def weighted_percentile(data,weights,percentile = 50):
+	weights_tot = np.nansum(weights)
+	data_argsort = np.argsort(data)
+	sort_weights = weights[data_argsort]
+	sort_data = data[data_argsort]
+	tot=0
+	jj = -1
+	sort_weights = sort_weights / weights_tot
+
+	cumsum_weights = np.cumsum(sort_weights) - 0.5*sort_weights #places each point at it's centre
+
+	value = np.interp(percentile/100, cumsum_weights,sort_data)
+
+	return value
+
+	#OLD CODE FOR WEIGHTED MEDIAN
+	# while(tot<0.5):
+	# 	jj +=1
+	# 	tot += sort_weights[jj]
+	
+	# kk = len(data)
+	# tot=0
+	# while(tot<0.5):
+	# 	kk-=1
+	# 	tot+= sort_weights[kk]
+	# if data_argsort[kk] == data_argsort[jj]:
+	# 	weighted_median = sort_data[kk]
+	# else:
+	# 	weighted_median = 0.5*(sort_data[kk] + sort_data[jj])
+
+	# return weighted_median
+
+
+def standard_error_on_median(sample,Nsamp=10000):
+	medians = np.zeros(Nsamp)
+	for ii in range(Nsamp):
+		samp = rng.choice(sample, len(sample), replace=True)
+		medians[ii] = np.median(samp)
+
+	# plt.hist(medians,bins=20)
+	# plt.show()
+
+	SE = np.std(medians)
+	return SE 
+
+
+def median_absolute_deviation(array):
+	MAD = np.nanmedian( np.abs(array - np.nanmedian(array)) )
+	MAD = 1.4826*MAD
+	return MAD
+
+
+def equal_contribution_histogram_v1(data,bins):
+	#stacks and renormalises histograms to weight each input equally
+	#data = nested list of datasets to compute the histograms on
+	#bins = bins
+
+
+	hists = np.zeros([len(data),len(bins)-1])
+	
+	for jj in range(len(data)):
+		if len(data[jj])>0:
+			hist,bins = np.histogram(data[jj],bins=bins,density=True)
+			hists[jj,:] = hist
+
+	hists_total = np.sum(hists,axis=0)
+	hists_equal = hists_total / (np.sum(hists_total*np.diff(bins)))
+
+
+	return hists_equal
+
+def equal_contribution_histogram_v2(data,bins,stats=None):
+	#stacks and renormalises histograms to weight each input equally, but better
+	#data = nested list of datasets to compute the histograms on
+	#bins = bins
+
+	data_all_JK = [] 
+	weights_all_JK = []
+
+	Ndata = len(data)
+	weights = [ np.ones_like(dat) / (Ndata*len(dat)) for dat in data] #each dataset is weighted by 1 / Nall*Nset
+																		#that way, total weights=1	
+	data_all = np.hstack(data)
+	weights_all = np.hstack(weights)
+
+	for ii in range(len(data)):
+		data_copy = data.copy()
+		if len(data) > 1:
+			data_copy = data_copy[0:ii] + data_copy[ii+1::]
+		Ndata_copy = len(data_copy)
+		weights_copy = [ np.ones_like(dat) / (Ndata_copy*len(data_copy)) for dat in data_copy]
+
+		data_all_copy = np.hstack(data_copy)
+		weights_all_copy = np.hstack(weights_copy)
+		data_all_JK.append(data_all_copy)
+		weights_all_JK.append(weights_all_copy)
+
+	hist,bins = np.histogram(data_all,bins=bins,weights=weights_all,density=True)
+
+	statistics = []
+
+	if isinstance(stats,list):
+		for ss in stats:
+			if ss == 'median':
+				stat = weighted_percentile(data_all,weights_all,percentile=50)
+				stat_JKs = []
+				for ii in range(len(data_all_JK)):
+					stat_JK = weighted_percentile(data_all_JK[ii],weights_all_JK[ii],percentile=50)
+					stat_JKs.extend([stat_JK])
+			if ss == 'mean':
+				stat = weighted_moment(data_all,weights_all,moment=1)
+				stat_JKs = []
+				for ii in range(len(data_all_JK)):
+					stat_JK = weighted_moment(data_all_JK[ii],weights_all_JK[ii],moment=1)
+					stat_JKs.extend([stat_JK])
+			if ss == 'stddev':
+				stat = weighted_moment(data_all,weights_all,moment=2)
+				stat_JKs = []
+				for ii in range(len(data_all_JK)):
+					stat_JK = weighted_moment(data_all_JK[ii],weights_all_JK[ii],moment=2)
+					stat_JKs.extend([stat_JK])
+			if ss == 'skewness':
+				stat = weighted_moment(data_all,weights_all,moment=3)
+				stat_JKs = []
+				for ii in range(len(data_all_JK)):
+					stat_JK = weighted_moment(data_all_JK[ii],weights_all_JK[ii],moment=3)
+					stat_JKs.extend([stat_JK])
+			if ss == 'kurtosis':
+				stat = weighted_moment(data_all,weights_all,moment=4)
+				stat_JKs = []
+				for ii in range(len(data_all_JK)):
+					stat_JK = weighted_moment(data_all_JK[ii],weights_all_JK[ii],moment=4)
+					stat_JKs.extend([stat_JK])
+			if "P" in ss:
+				percentile = int(ss.split("P")[-1])
+				stat = weighted_percentile(data_all,weights_all,percentile=percentile)
+				stat_JKs = []
+				for ii in range(len(data_all_JK)):
+					stat_JK = weighted_percentile(data_all_JK[ii],weights_all_JK[ii],percentile=percentile)
+					stat_JKs.extend([stat_JK])
+
+			stat_JKs = np.array(stat_JKs)
+			stat_err = ((Ndata - 1) / Ndata) * np.sum( (stat_JKs - np.mean(stat_JKs))**2 )
+			stat_err = np.sqrt(stat_err)
+
+			statistics.append([stat,stat_err])
+
+		return hist, statistics
+
+
+	elif not isinstance(stats,type(None)):
+		print("Stats needs to be a list")
+		exit()
+
+
+	return hist
+
+def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bootstrap'):
+	#stacks and renormalises histograms to weight each input equally, but better
+	#data = nested list of datasets to compute the histograms on
+	#bins = bins
+
+	# data_all_JK = [] 
+	# weights_all_JK = []
+
+	Ndata = len(data)
+	if weights == []:
+		weights.extend([ np.ones_like(dat) / (Ndata*len(dat)) for dat in data]) #each dataset is weighted by 1 / Nall*Nset
+																		#that way, total weights=1	
+	data_all = np.hstack(data)
+	weights_all = np.hstack(weights)
+
+	# for ii in range(len(data)):
+	# 	data_copy = data.copy()
+	# 	if len(data) > 1:
+	# 		data_copy = data_copy[0:ii] + data_copy[ii+1::]
+	# 	Ndata_copy = len(data_copy)
+	# 	weights_copy = [ np.ones_like(dat) / (Ndata_copy*len(data_copy)) for dat in data_copy]
+
+	# 	data_all_copy = np.hstack(data_copy)
+	# 	weights_all_copy = np.hstack(weights_copy)
+	# 	data_all_JK.append(data_all_copy)
+	# 	weights_all_JK.append(weights_all_copy)
+
+	hist, bins = np.histogram(data_all,bins=bins,weights=weights_all,density=True)
+
+	statistics = []
+
+	if isinstance(stats,list):
+		for ss in stats:
+			if ss == 'median':
+				func = lambda dd, ww : weighted_percentile(dd,ww,percentile=50)
+			if ss == 'mean':
+				func = lambda dd, ww : weighted_moment(dd,ww,moment=1)
+			if ss == 'stddev':
+				func = lambda dd, ww : weighted_moment(dd,ww,moment=2)
+			if ss == 'skewness':
+				func = lambda dd, ww : weighted_moment(dd,ww,moment=3)
+			if ss == 'kurtosis':
+				func = lambda dd, ww : weighted_moment(dd,ww,moment=4)
+			if "P" in ss:
+				percentile = int(ss.split("P")[-1])
+				func = lambda dd, ww : weighted_percentile(dd,ww,percentile=percentile)
+
+
+
+			stat = func(data_all,weights_all)
+
+			if method == 'jackknife':
+				stat_thetas = []
+				for ii in range(len(data)):
+					data_copy = copy.deepcopy(data)
+					if len(data) > 1:
+						data_resamp = data_copy[0:ii] + data_copy[ii+1::]
+					else:
+						data_resamp = data_copy
+					# print(len(data))
+					# print(len(data_resamp))
+
+					Ndata_resamp = len(data_resamp)
+					weights_resamp = [ np.ones_like(dat) / (Ndata_resamp*len(data_resamp)) for dat in data_resamp]
+					data_all_resamp = np.hstack(data_resamp)
+					weights_all_resamp = np.hstack(weights_resamp)
+
+					stat_thetas.extend([func(data_all_resamp,weights_all_resamp)])
+
+
+				stat_thetas = np.array(stat_thetas)
+				stat_var = ((Ndata - 1) / Ndata) * np.sum( (stat_thetas - np.mean(stat_thetas))**2 )
+				stat_err = np.sqrt(stat_var)
+
+
+
+			elif method == 'bootstrap':
+				stat_thetas = []
+				Nsamp = 10000
+				for ii in range(Nsamp):
+					resamp_index = rng.choice(len(data),len(data),replace=True)
+
+					# data_resamp = rng.choice(np.asarray(data,dtype=object), len(data), replace=True)
+					data_resamp = [data[dd] for dd in resamp_index]
+
+					# print(len(data))
+					# print(len(data_resamp))
+					# print(resamp_index)
+					# exit()
+					 
+					Ndata_resamp = len(data_resamp)
+					weights_resamp = [ np.ones_like(dat) / (Ndata_resamp*len(data_resamp)) for dat in data_resamp]
+
+					data_all_resamp = np.hstack(data_resamp)
+					weights_all_resamp = np.hstack(weights_resamp)
+
+					stat_thetas.extend([func(data_all_resamp,weights_all_resamp)])
+
+
+
+				stat_thetas = np.array(stat_thetas)
+				# print(np.mean(stat_thetas))
+				# plt.hist(stat_thetas - np.mean(stat_thetas),bins=100)
+				# plt.show()
+				# exit()
+				stat_var = (1. / Nsamp) * np.sum( (stat_thetas - np.mean(stat_thetas))**2 )
+				stat_err = np.sqrt(stat_var)
+
+
+			statistics.append([stat,stat_err])
+
+		return hist, statistics
+
+
+	elif not isinstance(stats,type(None)):
+		print("Stats needs to be a list")
+		exit()
+
+
+	return hist
+
+
+
+
+
+def norm_gaussian(xx,mu,sigma):
+	
+	prob = 1. / (sigma*np.sqrt(2.e0 * np.pi)) * \
+			np.exp(-0.5e0*( ((xx - mu) / sigma) *((xx - mu) / sigma) ))
+	return prob
+
+
+if __name__ == '__main__':
+	print('No main function bro')
+	# make_WCSregion_polygon()
+	# get_WCSregion_spectrum()
