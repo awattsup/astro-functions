@@ -1201,16 +1201,12 @@ def reproject_exact_AdamProper(input_data,output_projection,hdu = 0):
 		# diffs = []
 		for ii in range(input_header['NAXIS3']):
 			input_slice = data[ii,...]
-			Ngood_in = len(np.where(np.isfinite(input_slice)==True)[0])
 
 			output_slice = reproject_exact((input_slice,input_WCS.celestial),output_projection,
 									return_footprint=False) * pixel_conversion
-			Ngood_out = len(np.where(np.isfinite(output_slice)==True)[0])
-
 			output_data[ii,...] = output_slice 
 
 			# diffs.extend([np.nansum(input_slice)/np.nansum(output_slice)])
-
 
 			if ii% int(data.shape[0]/10) == 0:
 				print(int(round(100*ii/data.shape[0])),r'% done')
