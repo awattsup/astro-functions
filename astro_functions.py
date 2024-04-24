@@ -1,6 +1,7 @@
 import numpy as np
 import math 
 from math import gcd
+import matplotlib.path as pltPath
 import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.wcs import WCS, Wcsprm
@@ -20,8 +21,102 @@ import copy
 from scipy.stats import ks_2samp,anderson_ksamp
 import scipy.stats as sps
 from scipy.stats import distributions
+import os
 
 rng = np.random.default_rng()
+
+#some useful things
+
+emlines = {		'Hbeta':{	'lambda':[4861.333],			'ratio':[1]},
+				'Halpha':{	'lambda':[6562.819],			'ratio':[1]},
+				
+				'Pa9':{		'lambda':[9229.014],			'ratio':[1]},
+				'Pa10':{	'lambda':[9014.909],			'ratio':[1]},
+				'Pa11':{	'lambda':[8862.782],			'ratio':[1]},
+				'Pa12':{	'lambda':[8750.472],			'ratio':[1]},
+				'Pa13':{	'lambda':[8665.019],			'ratio':[1]},			#overlaps with CaT line!!
+				'Pa14':{	'lambda':[8598.392],			'ratio':[1]},
+				'Pa15':{	'lambda':[8545.383],			'ratio':[1]},			#overlaps with CaT line!!
+				'Pa16':{	'lambda':[8502.483],			'ratio':[1]},			#overlaps with CaT line!!
+				# 'Pa17':{	'lambda':[8467.254],			'ratio':[1]},
+				'Pa18':{	'lambda':[8437.956],			'ratio':[1]},
+				# 'Pa19':{	'lambda':[8413.318],			'ratio':[1]},
+				# 'Pa20':{	'lambda':[8392.397],			'ratio':[1]},
+
+
+
+				'OI':{		'lambda':[6300.304,6363.78],	'ratio':[1,0.33]},					#low ionisation 14.53
+				'OI8446': {	'lambda':[8446.359],			'ratio':[1]},
+				'OII':{		'lambda':[7319.990, 7330.730],	'ratio':[1,1]}, #?? check 			#low ionisation 13.62
+				'OIII':{	'lambda':[4958.911, 5006.843],	'ratio':[0.35,1]}, 					#high ionisation 35.12
+
+				'NI':{ 		'lambda':[5200.257],			'ratio':[1]},
+			 	'NII':{		'lambda':[6548.050,6583.460],	'ratio':[0.34,1]},					#low ionisation 15.43
+
+
+			 	'Fe4993':{	'lambda':[4993.358],			'ratio':[1]},
+			 	'Fe5018':{	'lambda':[5018.440],			'ratio':[1]},
+			 	
+				'HeI5876':{	'lambda':[5875.624],			'ratio':[1]}, 
+				'HeI6678':{	'lambda':[6678.151],			'ratio':[1]}, 
+				'HeI7065':{'lambda':[7065.196], 			'ratio':[1]},
+				'HeII4685':{'lambda':[4685.710],			'ratio':[1]}, 
+
+				'SII6716':{	'lambda':[6716.440],			'ratio':[1]},						#low ionisation 10.36
+				'SII6730':{	'lambda':[6730.810],			'ratio':[1]},						#^^
+				'SIII9069':{'lambda':[9068.6],				'ratio':[1]},						#high ionisation 23.33
+				
+				'ArIII7135':{'lambda':[7135.790],			'ratio':[1]}, 						#high ionisation 27.63 #doublet**
+				'ArIII7751':{'lambda':[7751.060],			'ratio':[1]},						#high ionisation 27.63
+				'ArIV':{	'lambda':[4711.260],			'ratio':[1]}, 						#high ionisation 40.74 #doublet**
+				'ArIV':{	'lambda':[4740.120],			'ratio':[1]},						#high ionisation 40.74
+				}
+
+emlines_indiv = {'Hbeta':{	'lambda':[4861.333],			'ratio':[1]},
+				'Halpha':{	'lambda':[6562.819],			'ratio':[1]},
+				
+				'Pa9':{		'lambda':[9229.014],			'ratio':[1]},
+				'Pa10':{	'lambda':[9014.909],			'ratio':[1]},
+				'Pa11':{	'lambda':[8862.782],			'ratio':[1]},
+				'Pa12':{	'lambda':[8750.472],			'ratio':[1]},
+				'Pa13':{	'lambda':[8665.019],			'ratio':[1]},			#overlaps with CaT line!!
+				'Pa14':{	'lambda':[8598.392],			'ratio':[1]},
+				'Pa15':{	'lambda':[8545.383],			'ratio':[1]},			#overlaps with CaT line!!
+				'Pa16':{	'lambda':[8502.483],			'ratio':[1]},			#overlaps with CaT line!!
+				# 'Pa17':{	'lambda':[8467.254],			'ratio':[1]},
+				'Pa18':{	'lambda':[8437.956],			'ratio':[1]},
+				# 'Pa19':{	'lambda':[8413.318],			'ratio':[1]},
+				# 'Pa20':{	'lambda':[8392.397],			'ratio':[1]},
+
+				'OI6300':{	'lambda':[6300.304],	'ratio':[1]},					#low ionisation 14.53
+				'OI6364':{	'lambda':[6363.78],		'ratio':[1]},					#low ionisation 14.53
+				'OI8446': {	'lambda':[8446.359],			'ratio':[1]},
+				'OII7312':{	'lambda':[7319.990],	'ratio':[1]}, #?? check 			#low ionisation 13.62
+				'OII7330':{	'lambda':[7330.730],	'ratio':[1]}, #?? check 			#low ionisation 13.62
+				'OIII4959':{'lambda':[4958.911],	'ratio':[1]}, 					#high ionisation 35.12
+				'OIII5006':{'lambda':[5006.843],	'ratio':[1]}, 					#high ionisation 35.12
+
+				'NI':{ 		'lambda':[5200.257],			'ratio':[1]},
+			 	'NII6548':{		'lambda':[6548.050],	'ratio':[1]},					#low ionisation 15.43
+			 	'NII6583':{		'lambda':[6583.460],	'ratio':[1]},					#low ionisation 15.43
+
+			 	'Fe4993':{	'lambda':[4993.358],			'ratio':[1]},
+			 	'Fe5018':{	'lambda':[5018.440],			'ratio':[1]},
+			 	
+				'HeI5876':{	'lambda':[5875.624],			'ratio':[1]}, 
+				'HeI6678':{	'lambda':[6678.151],			'ratio':[1]}, 
+				'HeI7065':{'lambda':[7065.196], 			'ratio':[1]},
+				'HeII4685':{'lambda':[4685.710],			'ratio':[1]}, 
+
+				'SII6716':{	'lambda':[6716.440],			'ratio':[1]},						#low ionisation 10.36
+				'SII6730':{	'lambda':[6730.810],			'ratio':[1]},						#^^
+				'SIII9069':{'lambda':[9068.6],				'ratio':[1]},						#high ionisation 23.33
+				
+				'ArIII7135':{'lambda':[7135.790],			'ratio':[1]}, 						#high ionisation 27.63 #doublet**
+				'ArIII7751':{'lambda':[7751.060],			'ratio':[1]},						#high ionisation 27.63
+				'ArIV4711':{	'lambda':[4711.260],			'ratio':[1]}, 						#high ionisation 40.74 #doublet**
+				'ArIV4740':{	'lambda':[4740.120],			'ratio':[1]},						#high ionisation 40.74
+				}
 
 
 def inside_polygon(coordinates, poly_x, poly_y):
@@ -31,9 +126,15 @@ def inside_polygon(coordinates, poly_x, poly_y):
 
 	poly_x = np.append(poly_x,poly_x[0])					#close polygon
 	poly_y = np.append(poly_y,poly_y[0])
+
+	poly_square = np.where((coordinates[:,0]>= np.min(poly_x)) &
+				 	(coordinates[:,0]<= np.max(poly_x)) &
+				 	(coordinates[:,1]>= np.min(poly_y)) &
+				 	(coordinates[:,1]<= np.max(poly_y)))[0]
 	
 	theta_arr = np.zeros(Ncoords)
-	for ii in range(Ncoords):
+	for ii in poly_square:
+
 
 		vec1_x = poly_x[0:-1] - coordinates[ii,0] 				#verticies 0 -> N-1
 		vec1_y = poly_y[0:-1] - coordinates[ii,1]
@@ -60,6 +161,16 @@ def inside_polygon(coordinates, poly_x, poly_y):
 	in_polygon = np.where(np.abs(theta_arr) > 5)[0]					#get total of angles. will be near 2pi if in polygon
 
 	return in_polygon
+
+
+def inside_polygon_v2(coordinates,poly_x,poly_y):
+	#borrowed/stolen from stack exchange: https://stackoverflow.com/questions/36399381/whats-the-fastest-way-of-checking-if-a-point-is-inside-a-polygon-in-python
+
+	path = pltPath.Path(np.array([poly_x,poly_y]).T)
+
+	inside = path.contains_points(coordinates)
+
+	return inside
 
 
 def get_SDSS_image(RA, DEC, arcsec=90, RADEC=False,head=False):
@@ -108,19 +219,91 @@ def get_SDSS_image(RA, DEC, arcsec=90, RADEC=False,head=False):
 
 		return img
 
+def get_legacy_colour_image(RA, DEC,imSize = 300):
+	"""Fetch the image at the given RA, DEC from the Legacy jpeg server"""
+	#imSize should be in arcsec
+	pix_scale = 0.262
 
-def im_fetch(outfile, RA, DEC):
+	imsize = int(round(imSize/pix_scale))
+
+	url = f"https://www.legacysurvey.org/viewer/jpeg-cutout/?ra={RA}&dec={DEC}&layer=ls-dr9&width={imsize}&height={imsize}&pixscale=0.262"
+	print(url)
+	r = requests.get(url)
+	img = Image.open(BytesIO(r.content))
+
+	CDELT1 = -pix_scale/3600.
+	CDELT2 = pix_scale/3600.
+	NAXIS1 = imSize
+	NAXIS2 = imSize
+	CRPIX1 = NAXIS1/2
+	CRPIX2 = NAXIS2/2
+	CRVAL1 = RA
+	CRVAL2 = DEC
+
+	w = WCS(naxis=2)
+	w.wcs.crpix = [CRPIX1,CRPIX2]
+	w.wcs.cdelt = [CDELT1,CDELT2]
+	w.wcs.crval = [CRVAL1,CRVAL2]
+	w.wcs.ctype=["RA---TAN","DEC--TAN"]
+
+	h = w.to_header()
+	h['NAXIS1'] = NAXIS1
+	h['NAXIS2'] = NAXIS2
+
+	pix_xxyy, pix_RADEC, pix_SP = make_pix_WCS_grids(h)
+
+	return img, [pix_xxyy, pix_RADEC, pix_SP], h
+
+def get_legacy_image(outfile, RA, DEC,imSize = 300,bands = 'r'):
     """Fetch the image at the given RA, DEC from the Legacy server"""
-    #top_level_url = ("https://www.legacysurvey.org/viewer/jpeg-cutout?ra=%s&dec=%s&zoom=14&layer=decals-dr7&width=1000&height=1000" % (RA, DEC)) # was 240x240For Legacy survey imaging .262"/pix. So 20' will be 4580 pix! Was 240
-    top_level_url_fits = ("https://www.legacysurvey.org/viewer/fits-cutout/?ra=%s&dec=%s&layer=ls-dr9&width=1000&height=1000&pixscale=0.262&bands=r" % (RA, DEC)) # For the r-band fits images.
-    #top_level_url_fits_cutout = ("https://www.legacysurvey.org/viewer/fits-cutout/?ra=%s&dec=%s&pixscale=0.5&layer=ls-dr9&size=3000&bands=g" % (RA, DEC)) # For the r-band fits images.
-    #top_level_url = ("http://skyservice.pha.jhu.edu/DR12/ImgCutout/getjpeg.aspx?ra=%.8f&dec=%.8f&scale=0.2&width=400&height=400" % (RA, DEC)) # For SDSS
-    r = requests.get(top_level_url_fits)
+    #imSize should be in arcsec
+    pix_scale = 0.262
+
+    imsize = int(round(imSize/pix_scale))
+    url = f"https://www.legacysurvey.org/viewer/fits-cutout/?ra={RA}&dec={DEC}&layer=ls-dr9&width={imSize}&height={imSize}&pixscale=0.262&bands={bands}"
+    print(url)
+   
+    r = requests.get(url)
     if r.ok:
         with open(outfile, 'wb') as file:
             file.write(r.content)
     else:
         print('No coverage for (%s, %s)' % (RA, DEC))
+
+def get_galex_image(outfile, RA, DEC,imSize = 300):
+    """Fetch the image at the given RA, DEC from the Legacy server"""
+    #imSize should be in arcsec
+
+    pix_scale = 1.5
+
+    imsize = int(round(imSize/pix_scale))
+
+    url = f"https://www.legacysurvey.org/viewer/fits-cutout/?ra={RA}&dec={DEC}&layer=galex&width={imsize}&height={imsize}&pixscale=1.5"
+    r = requests.get(url)
+    if r.ok:
+        with open(outfile, 'wb') as file:
+            file.write(r.content)
+    else:
+        print('No coverage for (%s, %s)' % (RA, DEC))
+
+
+def get_SDSS_mosaic_image(outName, RA, DEC, imSize=0.166667,filters = 'ugriz', scriptOnly=True):
+	
+
+	outName = os.path.expanduser(f'{outName}')
+	
+	url = f"https://dr12.sdss.org/mosaics/script?onlyprimary=False&pixelscale=0.396&ra={RA}&filters={filters}&dec={DEC}&size={imSize}"
+	script = requests.get(url)
+	if script.ok:
+		with open(outName,'wb') as file:
+			file.write(script.content)
+	else:
+		print('Mosaic fetch failed')
+
+	if not scriptOnly:
+		os.system(f"chmod +x {outName}")
+		os.system(f"./{outName}")
+
 
 def make_pix_WCS_grids_old(header):
 		
@@ -241,6 +424,55 @@ def convert_RADEC_to_skyplane(pix_RADEC,header):
 
 	return pix_SP
 
+def deproject_pixel_coordinates(x0, y0, pix_xx, pix_yy, PA=0, incl=0, reverse = False):
+	#PA must be measured East of North!
+	#aligns PA to x-axis
+	#should all be in sky-plane pixel coordinates!
+	PA =  (90 - PA) * np.pi/180.
+	incl = incl*np.pi/180.
+	
+	if not reverse:
+		#centre coordinates
+		pix_xx_sky = pix_xx - x0
+		pix_yy_sky = pix_yy - y0
+
+
+		pix_xx_sky = -pix_xx_sky			# this corrects the coordinate system to right-handed
+
+		#rotate to galaxy PA
+		pix_xx_gal = pix_xx_sky*np.cos(PA) - pix_yy_sky * np.sin(PA)
+		pix_yy_gal = (1.e0*pix_xx_sky*np.sin(PA) + pix_yy_sky* np.cos(PA)) 
+
+		#incline y-axis
+		pix_yy_gal *= 1./np.cos(incl)
+
+		pix_rr_gal = 3600*np.sqrt(pix_xx_gal**2.e0 + pix_yy_gal**2.e0)
+		
+		return pix_xx_gal,pix_yy_gal, pix_rr_gal
+
+
+	elif reverse:
+		pix_yy *= np.cos(incl)
+		pix_xx_sky = pix_xx*np.cos(PA) + pix_yy * np.sin(PA)
+		pix_yy_sky = (-1.e0*pix_xx*np.sin(PA) + pix_yy* np.cos(PA)) 
+
+		pix_xx_sky = -pix_xx_sky
+
+		pix_xx_sky += x0
+		pix_yy_sky += y0
+
+		return pix_xx_sky, pix_yy_sky
+
+
+
+def rot_mat(zrot,yrot,xrot):
+	#should be right-multiplied with row vectors np.matmul([x,y,z],rot_mat)
+
+	r1 = [np.cos(zrot)*np.cos(yrot),np.cos(zrot)*np.sin(yrot)*np.sin(xrot) - np.sin(zrot)*np.cos(xrot), np.cos(zrot)*np.sin(yrot)*np.cos(xrot)+np.sin(zrot)*np.sin(xrot)]
+	r2 = [np.sin(zrot)*np.cos(yrot), np.sin(zrot)*np.sin(yrot)*np.sin(xrot)+np.cos(zrot)*np.cos(xrot), np.sin(zrot)*np.sin(yrot)*np.cos(xrot)-np.cos(zrot)*np.sin(xrot)]
+	r3 = [-np.sin(yrot), np.cos(yrot)*np.sin(xrot), np.cos(yrot)*np.cos(xrot)]
+	rr = np.array([r1,r2,r3])
+	return rr
 
 def make_WCSregion_polygon(region_file):
 
@@ -346,12 +578,18 @@ def get_WCSregion_spectrum(datacube, region_file):
 	
 	return spectra
 
-def extract_subcube(datacube,subcube_index,filepath = True,hdu=0):
+def extract_subcube(datacube,subcube_index,filepath = True,hdu=0,mask=False):
 
 	if filepath:
 		cube = SpectralCube.read(datacube,hdu=hdu)
 	elif not filepath:
 		cube = SpectralCube(data=datacube[0],wcs=datacube[1])
+
+
+	if not isinstance(mask,bool):
+
+		cube = cube.with_mask(mask)
+
 
 	if subcube_index[0]=='all':
 		subcube = cube[:,
@@ -507,19 +745,30 @@ def weighted_moment(data,weights=None,moment = 1):
 
 
 def weighted_percentile(data,weights,percentile = 50):
-	weights_tot = np.nansum(weights)
-	data_argsort = np.argsort(data)
-	sort_weights = weights[data_argsort]
-	sort_data = data[data_argsort]
-	tot=0
-	jj = -1
-	sort_weights = sort_weights / weights_tot
+	weights = weights[np.isfinite(data)]
+	data = data[np.isfinite(data)]
+	
+	data = data[np.isfinite(weights)]
+	weights = weights[np.isfinite(weights)]
 
-	cumsum_weights = np.cumsum(sort_weights) - 0.5*sort_weights #places each point at it's centre
+	if len(data)==0 or len(weights)==0:
+		del weights
+		return None
+	else:
 
-	value = np.interp(percentile/100, cumsum_weights,sort_data)
+		weights_tot = np.nansum(weights)
+		data_argsort = np.argsort(data)
+		sort_weights = weights[data_argsort]
+		sort_data = data[data_argsort]
+		tot=0
+		jj = -1
+		sort_weights = sort_weights / weights_tot
 
-	return value
+		cumsum_weights = np.cumsum(sort_weights) - 0.5*sort_weights #places each point at it's centre
+
+		value = np.interp(percentile/100, cumsum_weights,sort_data)
+		del weights
+		return value
 
 	#OLD CODE FOR WEIGHTED MEDIAN
 	# while(tot<0.5):
@@ -552,10 +801,21 @@ def standard_error_on_median(sample,Nsamp=10000):
 	return SE 
 
 
-def median_absolute_deviation(array):
+def median_absolute_deviation(array,Niter=1):
 	MAD = np.nanmedian( np.abs(array - np.nanmedian(array)) )
 	MAD = 1.4826*MAD
-	return MAD
+
+	for ii in range(Niter-1):
+		array = array[(np.abs(array - np.nanmedian(array)) <=2.5*MAD)]
+		med = np.nanmedian(array)
+		
+		MAD = np.nanmedian( np.abs(array - med) )
+		MAD = 1.4826*MAD
+		# print(MAD)
+
+
+
+	return med, MAD
 
 
 def equal_contribution_histogram_v1(data,bins):
@@ -673,10 +933,15 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 
 	Ndata = len(data)
 	if weights == []:
-		weights.extend([ np.ones_like(dat) / (Ndata*len(dat)) for dat in data]) #each dataset is weighted by 1 / Nall*Nset
-																		#that way, total weights=1	
+		for ii in range(Ndata):
+			weights.extend([np.ones_like(data[ii]) / (Ndata*len(data[ii]))]) #each dataset is weighted by 1 / Nall*Nset
+																		#that way, total weights=1											
 	data_all = np.hstack(data)
 	weights_all = np.hstack(weights)
+
+	# print(len(data_all))
+	# print(len(weights_all))
+	# exit()
 
 	# for ii in range(len(data)):
 	# 	data_copy = data.copy()
@@ -689,6 +954,7 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 	# 	weights_all_copy = np.hstack(weights_copy)
 	# 	data_all_JK.append(data_all_copy)
 	# 	weights_all_JK.append(weights_all_copy)
+	# print(len(data),len(weights),data_all.shape,weights_all.shape)
 
 	hist, bins = np.histogram(data_all,bins=bins,weights=weights_all,density=True)
 
@@ -770,6 +1036,8 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 				# exit()
 				stat_var = (1. / Nsamp) * np.sum( (stat_thetas - np.mean(stat_thetas))**2 )
 				stat_err = np.sqrt(stat_var)
+			elif method == None:
+				stat_err = -1
 
 
 			statistics.append([stat,stat_err])
@@ -785,14 +1053,193 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 	return hist
 
 
-
-
-
 def norm_gaussian(xx,mu,sigma):
 	
 	prob = 1. / (sigma*np.sqrt(2.e0 * np.pi)) * \
 			np.exp(-0.5e0*( ((xx - mu) / sigma) *((xx - mu) / sigma) ))
 	return prob
+
+def fit_2d_gaussian(xx,yy,values,p0=None):
+	from scipy.optimize import curve_fit
+
+	coords = np.vstack((xx,yy)).T
+
+	coords = coords[np.isfinite(values),:]
+	values = values[np.isfinite(values)]
+
+
+	if isinstance(p0,type(None)):
+		p0 = [np.nanmax(values),np.nanmedian(coords[:,0]),np.nanmedian(coords[:,1]),0,1,0.5]
+
+	fit, covar = curve_fit(Gaussian_2d,coords,values,
+				p0=p0)
+
+	return fit
+
+
+def Gaussian_2d(data, A, x0, y0, theta, sigma_x, sigma_y):
+	
+	xx = data[:,0]
+	yy = data[:,1]
+
+	sigma_x *= sigma_x
+	sigma_y *= sigma_y
+	x = xx - x0
+	y = yy - y0
+
+
+	a = (np.cos(theta)**2.e0)/(2.e0 * sigma_x) + (np.sin(theta)**2.e0)/(2.e0 * sigma_y)
+	b = np.sin(2.e0 * theta) / (4.e0 * sigma_y) - np.sin(2.e0 * theta) / (4.e0*sigma_x)
+	c = (np.sin(theta)**2.e0)/(2.e0 * sigma_x) + (np.cos(theta)**2.e0)/(2.e0 * sigma_y)
+
+	G = A* np.exp(-1.e0*( a*x*x + 2.e0*b*x*y + c*y*y ))
+	# G = A*np.exp(-1.e0*( (xx-x0)*(xx-x0)/(2.e0*sigma_x*sigma_x) + (yy-y0)*(yy-y0)/(2.e0*sigma_y*sigma_y) ) )
+
+	return G
+
+
+
+
+def EBV_Hlines(F1 ,F2 ,lambda1 = 6562.819 ,lambda2 = 4861.333, Rint = 2.83,k_l = None):
+    #lambdas in angstrom
+    #F1=HA F2 = HB (default)
+    
+	if isinstance(k_l,type(None)):
+	   k_l = lambda ll: extinction_curve(ll)
+
+	ratio = np.log10((F1/F2) / Rint)
+
+	kdiff = k_l(lambda2) - k_l(lambda1)
+
+	E_BV = ratio / (0.4 * kdiff)
+	# print(np.min(E_BV))
+
+	E_BV[np.isfinite(E_BV)==False] = 0
+	# print(np.min(E_BV))
+
+	return E_BV
+
+
+@np.vectorize
+def extinction_curve(ll, RV = 3.1, extcurve = 'Cardelli89'):
+    ##ll should be in Angstrom
+    
+    #stellar extinction curve
+    if extcurve == 'Calzetti00':
+        ll *= 1.e-4         #convert to micron
+        llinv = 1.e0/ll
+
+        if  ll >= 0.12 and ll < 0.63:
+            k = 2.659*(-2.156 + 1.509*llinv - 0.196*(llinv*llinv) + 0.011*(llinv*llinv*llinv)) + RV
+
+        elif ll >=0.63 and ll <=2.20:
+            k = 2.659*(-1.857 + 1.040*llinv) + RV
+        else:
+            k = np.nan
+
+    #MW attenuation curve
+    if extcurve == 'Cardelli89':
+        ll *= 1.e-4
+        llinv = 1.e0/ll
+
+        if llinv>=1.1 and llinv<=0.3:
+            aa = 0.574*llinv**1.61 
+            bb = -0.527*llinv**1.61
+
+        elif llinv <= 3.3 and llinv>=1.1:
+            yy = llinv - 1.82
+            aa = 1 + 0.17699*yy - 0.50447*yy**2 - 0.02427*yy**3 + 0.72085*yy**4 + 0.01979*yy**5 - 0.77530*yy**6 + 0.32999*yy**7
+            bb = 1.41338*yy + 2.28305*yy**2 + 1.07233*yy**3 - 5.38434*yy**4 - 0.62251*yy**5 + 5.30260*yy**6 - 2.09002*yy**7
+
+        elif llinv >= 3.3 and llinv <=8:
+            if llinv >=5.9 and llinv <=8:
+                Faa = -0.04473*(llinv - 5.9)**2 - 0.009779*(llinv - 5.9)**3
+                Fbb = 0.2130*(llinv - 5.9)**2 - 0.1207*(llinv - 5.9)**3
+            elif llinv < 5.9:
+                Faa  = 0
+                Fbb = 0
+
+            aa = 1.752 - 0.316*llinv - (0.104/( (llinv - 4.67)**2 + 0.341 )) + Faa
+            bb = -3.090 + 1.825*llinv + (1.206/( (llinv - 4.62)**2 + 0.263 )) + Fbb
+        else:
+            aa = np.nan
+            bb = np.nan
+
+
+        Al_AV = aa + bb/RV
+        k = (Al_AV) * RV
+
+    return k
+
+# def kewley06_BPT_classification
+
+
+
+def reproject_exact_AdamProper(input_data,output_projection,hdu = 0):
+	try:
+		from reproject import reproject_exact, reproject_adaptive
+	except:
+		print('No reproject!!')
+		exit()
+
+
+	data = input_data[hdu].data
+
+	input_header = input_data[hdu].header
+	input_WCS = WCS(input_header)
+	# print(input_header)
+
+	output_shape = (input_WCS.array_shape[0], WCS(output_projection).array_shape[0],WCS(output_projection).array_shape[1])
+	pixarea_in = input_WCS.celestial.proj_plane_pixel_area().value*(3600**2)
+	pixarea_out =   WCS(output_projection).celestial.proj_plane_pixel_area().value *(3600**2)
+	pixel_conversion = pixarea_out/pixarea_in
+
+	# print(pixarea_in,pixarea_out,pixel_conversion)
+
+	if input_header['NAXIS'] == 3:
+
+		output_data = np.zeros(output_shape)
+
+		diffs = []
+		for ii in range(input_header['NAXIS3']):
+			input_slice = data[ii,...]
+			Ngood_in = len(np.where(np.isfinite(input_slice)==True)[0])
+
+			output_slice = reproject_exact((input_slice,input_WCS.celestial),output_projection,
+									return_footprint=False) * pixel_conversion
+			Ngood_out = len(np.where(np.isfinite(output_slice)==True)[0])
+
+			output_data[ii,...] = output_slice 
+
+			diffs.extend([np.nansum(input_slice)/np.nansum(output_slice)])
+			# print(np.nansum(input_slice),np.nansum(output_slice), np.nansum(input_slice)/np.nansum(output_slice))
+			# plt.figure()
+			# plt.imshow(input_slice)#,vmin=-5,vmax=5)
+			# plt.figure()
+			# plt.imshow(output_slice)#,vmin=-5,vmax=5)
+			# plt.show()
+			# exit()
+
+			if ii% int(data.shape[0]/10) == 0:
+				print(int(round(100*ii/data.shape[0])),r'% done')
+
+	plt.hist(np.array(diffs)-1,bins=50)
+	plt.show()
+	#reproject_exact currently does not conserve flux 
+
+
+	# output_data *= pixel_conversion
+
+	return output_data
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
