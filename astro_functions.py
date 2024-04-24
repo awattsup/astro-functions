@@ -1194,13 +1194,11 @@ def reproject_exact_AdamProper(input_data,output_projection,hdu = 0):
 	pixarea_out =   WCS(output_projection).celestial.proj_plane_pixel_area().value *(3600**2)
 	pixel_conversion = pixarea_out/pixarea_in
 
-	# print(pixarea_in,pixarea_out,pixel_conversion)
-
 	if input_header['NAXIS'] == 3:
 
 		output_data = np.zeros(output_shape)
 
-		diffs = []
+		# diffs = []
 		for ii in range(input_header['NAXIS3']):
 			input_slice = data[ii,...]
 			Ngood_in = len(np.where(np.isfinite(input_slice)==True)[0])
@@ -1211,21 +1209,11 @@ def reproject_exact_AdamProper(input_data,output_projection,hdu = 0):
 
 			output_data[ii,...] = output_slice 
 
-			diffs.extend([np.nansum(input_slice)/np.nansum(output_slice)])
-			# print(np.nansum(input_slice),np.nansum(output_slice), np.nansum(input_slice)/np.nansum(output_slice))
-			# plt.figure()
-			# plt.imshow(input_slice)#,vmin=-5,vmax=5)
-			# plt.figure()
-			# plt.imshow(output_slice)#,vmin=-5,vmax=5)
-			# plt.show()
-			# exit()
+			# diffs.extend([np.nansum(input_slice)/np.nansum(output_slice)])
+
 
 			if ii% int(data.shape[0]/10) == 0:
 				print(int(round(100*ii/data.shape[0])),r'% done')
-
-	plt.hist(np.array(diffs)-1,bins=50)
-	plt.show()
-	#reproject_exact currently does not conserve flux 
 
 
 	# output_data *= pixel_conversion
