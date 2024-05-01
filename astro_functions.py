@@ -260,7 +260,7 @@ def get_legacy_image(outfile, RA, DEC,imSize = 300,bands = 'r'):
     pix_scale = 0.262
 
     imsize = int(round(imSize/pix_scale))
-    url = f"https://www.legacysurvey.org/viewer/fits-cutout/?ra={RA}&dec={DEC}&layer=ls-dr9&width={imSize}&height={imSize}&pixscale=0.262&bands={bands}"
+    url = f"https://www.legacysurvey.org/viewer/fits-cutout/?ra={RA}&dec={DEC}&layer=ls-dr10&width={imsize}&height={imsize}&pixscale=0.262&bands={bands}"
     print(url)
    
     r = requests.get(url)
@@ -1172,6 +1172,49 @@ def extinction_curve(ll, RV = 3.1, extcurve = 'Cardelli89'):
     return k
 
 # def kewley06_BPT_classification
+
+
+def lgMstarMsun_Zibetti09(colour_data,absMag_data, colour='gi', band='i'):
+
+	# Colour ag bg ar br ai bi az bz aJ bJ aH bH aK bK
+	# u − g −1.628 1.360 −1.319 1.093 −1.277 0.980 −1.315 0.913 −1.350 0.804 −1.467 0.750 −1.578 0.739
+	# u − r −1.427 0.835 −1.157 0.672 −1.130 0.602 −1.181 0.561 −1.235 0.495 −1.361 0.463 −1.471 0.455
+	# u − i −1.468 0.716 −1.193 0.577 −1.160 0.517 −1.206 0.481 −1.256 0.422 −1.374 0.393 −1.477 0.384
+	# u − z −1.559 0.658 −1.268 0.531 −1.225 0.474 −1.260 0.439 −1.297 0.383 −1.407 0.355 −1.501 0.344
+	# g − r −1.030 2.053 −0.840 1.654 −0.845 1.481 −0.914 1.382 −1.007 1.225 −1.147 1.144 −1.257 1.119
+	# g − i −1.197 1.431 −0.977 1.157 −0.963 1.032 −1.019 0.955 −1.098 0.844 −1.222 0.780 −1.321 0.754
+	# g − z −1.370 1.190 −1.122 0.965 −1.089 0.858 −1.129 0.791 −1.183 0.689 −1.291 0.632 −1.379 0.604
+	# r − i −1.405 4.280 −1.155 3.482 −1.114 3.087 −1.145 2.828 −1.199 2.467 −1.296 2.234 −1.371 2.109
+	# r − z −1.576 2.490 −1.298 2.032 −1.238 1.797 −1.250 1.635 −1.271 1.398 −1.347 1.247 −1.405 1.157
+
+	if colour == 'gi':
+		if band == 'g':
+			a = -1.197
+			b = 1.431
+		elif band == 'i':
+			a = -0.963
+			b =  1.032
+
+			absMag_sun = 4.58
+
+
+	logMLr = a + b*colour_data
+
+	logMstarMsun = logMLr + 0.4*(absMag_sun - absMag_data)
+
+	return logMstarMsun
+
+def lgMstarMsun_Taylor11(colour_data, absMag_data):
+
+	absMag_sun = 4.58
+
+
+	logMLr = -0.68 + 0.7*colour_data
+
+
+	logMstarMsun = logMLr + 0.4*(absMag_sun - absMag_data)
+
+	return logMstarMsun
 
 
 
