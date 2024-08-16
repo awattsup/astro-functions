@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.polynomial as npPoly
 import math 
 from math import gcd
 import matplotlib.path as pltPath
@@ -23,54 +24,61 @@ import scipy.stats as sps
 from scipy.stats import distributions
 import os
 
+import astropy.constants as ac
+import astropy.units as au
+from astropy.stats import sigma_clip
+
+
+
 rng = np.random.default_rng()
 
 #some useful things
 
-emlines = {		'Hbeta':{	'lambda':[4861.333],			'ratio':[1]},
-				'Halpha':{	'lambda':[6562.819],			'ratio':[1]},
-				
-				'Pa9':{		'lambda':[9229.014],			'ratio':[1]},
-				'Pa10':{	'lambda':[9014.909],			'ratio':[1]},
-				'Pa11':{	'lambda':[8862.782],			'ratio':[1]},
-				'Pa12':{	'lambda':[8750.472],			'ratio':[1]},
-				'Pa13':{	'lambda':[8665.019],			'ratio':[1]},			#overlaps with CaT line!!
-				'Pa14':{	'lambda':[8598.392],			'ratio':[1]},
-				'Pa15':{	'lambda':[8545.383],			'ratio':[1]},			#overlaps with CaT line!!
-				'Pa16':{	'lambda':[8502.483],			'ratio':[1]},			#overlaps with CaT line!!
-				# 'Pa17':{	'lambda':[8467.254],			'ratio':[1]},
-				'Pa18':{	'lambda':[8437.956],			'ratio':[1]},
-				# 'Pa19':{	'lambda':[8413.318],			'ratio':[1]},
-				# 'Pa20':{	'lambda':[8392.397],			'ratio':[1]},
+emlines = { 'HI':{      'lambda':[21.106114], 'nu':[1420.405751], 'ratio':[1]},
+            'Hbeta':{	'lambda':[4861.333],			'ratio':[1]},
+            'Halpha':{	'lambda':[6562.819],			'ratio':[1]},
+
+            'Pa9':{		'lambda':[9229.014],			'ratio':[1]},
+            'Pa10':{	'lambda':[9014.909],			'ratio':[1]},
+            'Pa11':{	'lambda':[8862.782],			'ratio':[1]},
+            'Pa12':{	'lambda':[8750.472],			'ratio':[1]},
+            'Pa13':{	'lambda':[8665.019],			'ratio':[1]},			#overlaps with CaT line!!
+            'Pa14':{	'lambda':[8598.392],			'ratio':[1]},
+            'Pa15':{	'lambda':[8545.383],			'ratio':[1]},			#overlaps with CaT line!!
+            'Pa16':{	'lambda':[8502.483],			'ratio':[1]},			#overlaps with CaT line!!
+            'Pa17':{	'lambda':[8467.254],			'ratio':[1]},
+            'Pa18':{	'lambda':[8437.956],			'ratio':[1]},
+            'Pa19':{	'lambda':[8413.318],			'ratio':[1]},
+            'Pa20':{	'lambda':[8392.397],			'ratio':[1]},
 
 
 
-				'OI':{		'lambda':[6300.304,6363.78],	'ratio':[1,0.33]},					#low ionisation 14.53
-				'OI8446': {	'lambda':[8446.359],			'ratio':[1]},
-				'OII':{		'lambda':[7319.990, 7330.730],	'ratio':[1,1]}, #?? check 			#low ionisation 13.62
-				'OIII':{	'lambda':[4958.911, 5006.843],	'ratio':[0.35,1]}, 					#high ionisation 35.12
+            'OI':{		'lambda':[6300.304,6363.78],	'ratio':[1,0.33]},					#low ionisation 14.53
+            'OI8446': {	'lambda':[8446.359],			'ratio':[1]},
+            'OII':{		'lambda':[7319.990, 7330.730],	'ratio':[1,1]}, #?? check 			#low ionisation 13.62
+            'OIII':{	'lambda':[4958.911, 5006.843],	'ratio':[0.35,1]}, 					#high ionisation 35.12
 
-				'NI':{ 		'lambda':[5200.257],			'ratio':[1]},
-			 	'NII':{		'lambda':[6548.050,6583.460],	'ratio':[0.34,1]},					#low ionisation 15.43
+            'NI':{ 		'lambda':[5200.257],			'ratio':[1]},
+            'NII':{		'lambda':[6548.050,6583.460],	'ratio':[0.34,1]},					#low ionisation 15.43
 
 
-			 	'Fe4993':{	'lambda':[4993.358],			'ratio':[1]},
-			 	'Fe5018':{	'lambda':[5018.440],			'ratio':[1]},
-			 	
-				'HeI5876':{	'lambda':[5875.624],			'ratio':[1]}, 
-				'HeI6678':{	'lambda':[6678.151],			'ratio':[1]}, 
-				'HeI7065':{'lambda':[7065.196], 			'ratio':[1]},
-				'HeII4685':{'lambda':[4685.710],			'ratio':[1]}, 
+            'Fe4993':{	'lambda':[4993.358],			'ratio':[1]},
+            'Fe5018':{	'lambda':[5018.440],			'ratio':[1]},
 
-				'SII6716':{	'lambda':[6716.440],			'ratio':[1]},						#low ionisation 10.36
-				'SII6730':{	'lambda':[6730.810],			'ratio':[1]},						#^^
-				'SIII9069':{'lambda':[9068.6],				'ratio':[1]},						#high ionisation 23.33
-				
-				'ArIII7135':{'lambda':[7135.790],			'ratio':[1]}, 						#high ionisation 27.63 #doublet**
-				'ArIII7751':{'lambda':[7751.060],			'ratio':[1]},						#high ionisation 27.63
-				'ArIV':{	'lambda':[4711.260],			'ratio':[1]}, 						#high ionisation 40.74 #doublet**
-				'ArIV':{	'lambda':[4740.120],			'ratio':[1]},						#high ionisation 40.74
-				}
+            'HeI5876':{	'lambda':[5875.624],			'ratio':[1]}, 
+            'HeI6678':{	'lambda':[6678.151],			'ratio':[1]}, 
+            'HeI7065':{'lambda':[7065.196], 			'ratio':[1]},
+            'HeII4685':{'lambda':[4685.710],			'ratio':[1]}, 
+
+            'SII6716':{	'lambda':[6716.440],			'ratio':[1]},						#low ionisation 10.36
+            'SII6730':{	'lambda':[6730.810],			'ratio':[1]},						#^^
+            'SIII9069':{'lambda':[9068.6],				'ratio':[1]},						#high ionisation 23.33
+
+            'ArIII7135':{'lambda':[7135.790],			'ratio':[1]}, 						#high ionisation 27.63 #doublet**
+            'ArIII7751':{'lambda':[7751.060],			'ratio':[1]},						#high ionisation 27.63
+            'ArIV':{	'lambda':[4711.260],			'ratio':[1]}, 						#high ionisation 40.74 #doublet**
+            'ArIV':{	'lambda':[4740.120],			'ratio':[1]},						#high ionisation 40.74
+            }
 
 emlines_indiv = {'Hbeta':{	'lambda':[4861.333],			'ratio':[1]},
 				'Halpha':{	'lambda':[6562.819],			'ratio':[1]},
@@ -393,7 +401,27 @@ def make_pix_WCS_grids(header):
 
 	return  pix_xxyy, pix_RADEC, pix_SP
 
-def get_wavelength_axis(header, units=1.e10):
+
+def get_wavelength_axis(header,axtype = None):
+    wcs = WCS(header)
+    pix_wav = np.asarray(wcs.spectral.pixel_to_world(np.arange(header['NAXIS3'])))
+
+    if axtype == "FREQ" or "FREQ" in wcs.axis_type_names:
+        pix_wav = ac.c.value / pix_wav
+
+    return pix_wav
+
+
+def get_frequency_axis(header,axtype = None):
+    wcs = WCS(header)
+    pix_freq = np.asarray(wcs.spectral.pixel_to_world(np.arange(header['NAXIS3'])))
+
+    if axtype == "WAV" or "WAV" in wcs.axis_type_names:
+        pix_freq = ac.c.value / pix_freq
+
+    return pix_freq
+
+def get_wavelength_axis_old(header, units=1.e10):
 	
 	wcs =  WCS(header)
 	pix_WAV = units*np.asarray(wcs.sub([3]).pixel_to_world(np.arange(header['NAXIS3'])))
@@ -724,8 +752,13 @@ def weighted_moment(data,weights=None,moment = 1):
 	if isinstance(weights,type(None)):
 		weights = np.ones_like(data)
 
+	if moment >= 0:
+
+		moment0 = np.sum(data*weights)
+		mom = moment0
+
 	if moment >= 1:
-		moment1 =  np.sum(data*weights) / np.sum(weights)
+		moment1 =  moment0 / np.sum(weights)
 		mom = moment1
 
 	if moment >= 2:
@@ -739,10 +772,32 @@ def weighted_moment(data,weights=None,moment = 1):
 	if moment == 4:
 		mom = np.sum(weights * ((data - moment1) / moment2)**4) / np.sum(weights) - 3
 
-
 	
 	return mom	
 
+def weighted_moment_and_uncertainty(data,weights=None,moment=[1],noise=None,nIter=10000):
+
+	noiseArr = rng.normal(loc=0,scale=noise,size=(nIter,len(noise))).T
+
+
+	nMoments = len(moment)
+
+	moms = []
+
+	for mm in range(nMoments):
+		mom = weighted_moment(data,weights,moment=moment[mm])
+		momDist = []
+		for nn in range(nIter):
+			momDist.extend([weighted_moment(data,weights+noiseArr[:,nn],moment=moment[mm])])
+
+		sigmaMom = median_absolute_deviation(np.array(momDist),Niter=5)[1]
+		# plt.figure()
+		# plt.hist(np.array(momDist)[np.abs(mom - np.array(momDist))<3*sigmaMom],bins=100)
+		# plt.show()
+		# print(moment[mm],mom,np.nanmedian(momDist),sigmaMom,np.sqrt(np.sum((noise*data)**2)),np.nanmedian(momDist)/sigmaMom, mom/np.sqrt(np.sum((noise*data)**2)))
+		moms.extend([mom,sigmaMom])
+
+	return moms
 
 def weighted_percentile(data,weights,percentile = 50):
 	weights = weights[np.isfinite(data)]
@@ -802,20 +857,23 @@ def standard_error_on_median(sample,Nsamp=10000):
 
 
 def median_absolute_deviation(array,Niter=1):
-	MAD = np.nanmedian( np.abs(array - np.nanmedian(array)) )
-	MAD = 1.4826*MAD
+    # med = np.nanmedian(array)
 
-	for ii in range(Niter-1):
-		array = array[(np.abs(array - np.nanmedian(array)) <=2.5*MAD)]
-		med = np.nanmedian(array)
-		
-		MAD = np.nanmedian( np.abs(array - med) )
-		MAD = 1.4826*MAD
-		# print(MAD)
+    MAD = np.nanmedian( np.abs(array - np.nanmedian(array)) )
+    MAD = 1.4826*MAD
 
 
+    for ii in range(Niter):
+        array = array[(np.abs(array - np.nanmedian(array)) <=2.5*MAD)]
+        med = np.nanmedian(array)
 
-	return med, MAD
+        MAD = np.nanmedian( np.abs(array - med) )
+        MAD = 1.4826*MAD
+        print(MAD)
+
+
+
+    return med, MAD
 
 
 def equal_contribution_histogram_v1(data,bins):
@@ -923,7 +981,7 @@ def equal_contribution_histogram_v2(data,bins,stats=None):
 
 	return hist
 
-def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bootstrap'):
+def equal_contribution_histogram(data,bins, weights = None,stats=None,method = 'bootstrap'):
 	#stacks and renormalises histograms to weight each input equally, but better
 	#data = nested list of datasets to compute the histograms on
 	#bins = bins
@@ -932,7 +990,8 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 	# weights_all_JK = []
 
 	Ndata = len(data)
-	if weights == []:
+	if isinstance(weights,type(None)):
+		weights = []
 		for ii in range(Ndata):
 			weights.extend([np.ones_like(data[ii]) / (Ndata*len(data[ii]))]) #each dataset is weighted by 1 / Nall*Nset
 																		#that way, total weights=1											
@@ -1007,7 +1066,7 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 
 			elif method == 'bootstrap':
 				stat_thetas = []
-				Nsamp = 10000
+				Nsamp = 10
 				for ii in range(Nsamp):
 					resamp_index = rng.choice(len(data),len(data),replace=True)
 
@@ -1049,7 +1108,7 @@ def equal_contribution_histogram(data,bins, weights = [],stats=None,method = 'bo
 		print("Stats needs to be a list")
 		exit()
 
-
+	del weights
 	return hist
 
 
@@ -1174,7 +1233,7 @@ def extinction_curve(ll, RV = 3.1, extcurve = 'Cardelli89'):
 # def kewley06_BPT_classification
 
 
-def lgMstarMsun_Zibetti09(colour_data,absMag_data, colour='gi', band='i'):
+def lgMstarMsun_Zibetti09(colour_data,absMag_data, band1='g', band2='i'):
 
 	# Colour ag bg ar br ai bi az bz aJ bJ aH bH aK bK
 	# u − g −1.628 1.360 −1.319 1.093 −1.277 0.980 −1.315 0.913 −1.350 0.804 −1.467 0.750 −1.578 0.739
@@ -1187,15 +1246,23 @@ def lgMstarMsun_Zibetti09(colour_data,absMag_data, colour='gi', band='i'):
 	# r − i −1.405 4.280 −1.155 3.482 −1.114 3.087 −1.145 2.828 −1.199 2.467 −1.296 2.234 −1.371 2.109
 	# r − z −1.576 2.490 −1.298 2.032 −1.238 1.797 −1.250 1.635 −1.271 1.398 −1.347 1.247 −1.405 1.157
 
+	colour=f"{band1}{band2}"
+
 	if colour == 'gi':
-		if band == 'g':
+		if band2 == 'g':
 			a = -1.197
 			b = 1.431
-		elif band == 'i':
+		elif band2 == 'i':
 			a = -0.963
 			b =  1.032
 
 			absMag_sun = 4.58
+	elif colour == 'gr':
+		if band2 == 'r':
+			a = -0.840
+			b = 1.654
+			absMag_sun = 4.65
+
 
 
 	logMLr = a + b*colour_data
@@ -1206,15 +1273,105 @@ def lgMstarMsun_Zibetti09(colour_data,absMag_data, colour='gi', band='i'):
 
 def lgMstarMsun_Taylor11(colour_data, absMag_data):
 
-	absMag_sun = 4.58
+	# absMag_sun = 4.58
 
 
-	logMLr = -0.68 + 0.7*colour_data
+	# logMLr = -0.68 + 0.7*colour_data
 
 
-	logMstarMsun = logMLr + 0.4*(absMag_sun - absMag_data)
+	# logMstarMsun = logMLr + 0.4*(absMag_sun - absMag_data)
+
+	logMstarMsun = 1.15+0.7*(colour_data) - 0.4*absMag_data
 
 	return logMstarMsun
+
+def lgMstarMsun_TaylorSAMI(gi_colour, obs_imag, D_comov, z):
+	#D_comov should be in Mpc
+	Dmod = 5*(np.log10(D_comov) - 1 + 6)
+
+	logMstarMsun = -0.4*obs_imag + 0.4*Dmod - np.log10(1 + z) + \
+					(1.2117 - 0.5893*z) + (0.7106 - 0.1467*z)*gi_colour
+
+
+	return logMstarMsun
+
+
+
+
+def logOH_Scal_PG16(HB, OIII, NII, SII):
+
+    R3 = OIII / HB
+    N2 = NII / HB
+    S2 = SII / HB
+
+    logOH12_upper = (8.424 + 0.030*np.log10(R3/S2) + 0.751*np.log10(N2) + \
+                    (-0.349+0.182*np.log10(R3/S2) + 0.508*np.log10(N2) )*np.log10(S2))
+
+    logOH12_lower = (8.072 + 0.789*np.log10(R3/S2) + 0.726*np.log10(N2) + \
+                    (1.069+0.170*np.log10(R3/S2) + 0.022*np.log10(N2) )*np.log10(S2))
+
+
+    logOH = np.full(len(HB),np.nan)
+    logOH[np.log10(N2)>=-0.6] = logOH12_upper[np.log10(N2)>=-0.6]
+    logOH[np.log10(N2)<-0.6] = logOH12_lower[np.log10(N2)<-0.6]
+
+
+    return logOH
+
+def logOH_N2S2Ha_D16(HA,NIIr,SII):
+
+	y = np.log10(NIIr/SII) + 0.264 * np.log10(NIIr/HA)
+
+	logOH = 8.77 + y
+
+	return logOH
+
+def logOH_C20(R_obs,calib = 'N2'):
+	from scipy.interpolate import CubicSpline
+
+	# ['R2', 0.435, -1.362, -5.655, -4.851, -0.478, 0.736, 0.11, 0.10]
+	# ['R3', -0.277, -3.549, -3.593, -0.981, 0, 0, 0.09, 0.07]
+	# ['O3O2', -0.691, -2.944, -1.308, 0, 0, 0, 0.15, 0.14]
+	# ['R23', 0.527, -1.569, -1.652, -0.421, 0, 0, 0.06, 0.12]
+	# ['N2', -0.489, 1.513, -2.554, -5.293, -2.867, 0, 0.16, 0.10]
+	# ['O3N2', 0.281, -4.765, -2.268, 0, 0, 0, 0.21, 0.09]
+	# ['S2', -0.442, -0.360, -6.271, -8.339, -3.559, 0, 0.11, 0.06]
+	# ['RS32', -0.054, -2.546, -1.970, 0.082, 0.222, 0, 0.07, 0.08]
+	# ['O3S2',  0.191, -4.292, -2.538, 0.053, 0.332, 0, 0.17, 0.11]
+
+	logOH_array = np.arange(7.75,8.85,0.001)
+
+	if calib == 'R3':
+		logR = lambda x: -0.277 -3.549*x -3.593*x**2 -0.981*x**3
+		logOH_array = np.arange(8.003,8.85,0.001)
+
+	if calib == 'N2':
+		logR = lambda x: -0.489 + 1.513*x - 2.554*x**2 - 5.293*x**3 - 2.867*x**4
+
+	elif calib == 'O3N2':
+		logR = lambda x: 0.281 -4.765*x - 2.268*x**2
+
+	elif calib == 'RS32':
+		logR = lambda x: -0.054 -2.546*x -1.970*x**2 + 0.082*x**3 + 0.222*x**4
+		logOH_array = np.arange(8,8.85,0.001)
+
+	elif calib == 'O3S2':
+		logR =lambda x: 0.191 -4.292*x -2.538*x**2 + 0.053*x**3 + 0.332*x**4
+
+	# logRobs_logRmod_diff = np.full([len(logOH_array),len(R_obs)],np.log10(R_obs)).T - logR(logOH_array - 8.6)		#computes for each input Robs
+
+	logR_mod = logR(logOH_array - 8.69)
+
+	if logR_mod[0] - logR_mod[-1] > 0:
+		logR_mod = logR_mod[::-1]
+		logOH_array = logOH_array[::-1]
+
+
+	logOH_func = CubicSpline(logR_mod,logOH_array,extrapolate=False)
+
+	logOH = logOH_func(np.log10(R_obs))
+
+	return logOH
 
 
 
@@ -1260,9 +1417,185 @@ def reproject_exact_AdamProper(input_data,output_projection,hdu = 0):
 	return output_data
 
 
+def makeThresholdMask(spectrumSN, narrowSN=3, broadSN=1.5, growSN = None, 
+                        segJoin = None, allSeg=False,plot=False):
+    
+    maskNarrow = np.zeros_like(spectrumSN)
+    maskBroad = np.zeros_like(spectrumSN)
+
+    for cc in range(1,len(spectrumSN)-1):
+        if spectrumSN[cc] >= narrowSN:
+            maskNarrow[cc] = 2
+        if np.all(spectrumSN[cc-1:cc+1] >= broadSN):
+            maskBroad[cc-1:cc+1] = 1
+
+    maskComb = maskNarrow + maskBroad
+
+    #identify spectrally continous mask segments
+    maskSegments = []
+    seg = []
+    for mm, val in enumerate(maskComb):
+        if val != 0:
+            seg.extend([mm])
+        elif val == 0 or mm == len(maskComb)-1:
+            #end of segment, only keep if it has a narrowMask component
+            if len(seg) != 0 and np.any(maskComb[seg] >= 2):    
+                maskSegments.append(seg)
+            seg = []
+
+    #grow mask 
+    if isinstance(growSN,float) or isinstance(growSN,int): 
+        maskSegmentsGrow = []            
+        #grow mask segments down closer to 0
+        for ss, seg in enumerate(maskSegments):
+            segLen = 0
+            while len(seg) != segLen:
+                segLen = len(seg)
+                if np.min(seg)-1>=0 and spectrumSN[np.min(seg)-1] > growSN:
+                    seg = [np.min(seg)-1] + seg
+                if np.max(seg)+1<len(spectrumSN)-1 and spectrumSN[np.max(seg)+1] > growSN:
+                    seg = seg + [np.max(seg)+1]
+
+            maskSegmentsGrow.append(seg)
+        maskSegments = maskSegmentsGrow
+
+
+    #join overlapping mask segments, or mask segments separated by a tolerance (segJoin)
+    if not isinstance(segJoin,type(None)) and len(maskSegments)>1: 
+        nSeg = 0
+        while len(maskSegments) != nSeg and len(maskSegments) > 1:
+            nSeg = len(maskSegments)
+            maskSegmentsJoin = []            
+
+
+            for seg,segNext in zip(maskSegments[:-1],maskSegments[1:]):
+                if np.min(segNext) - np.max(seg) <= segJoin:
+                    segJoined = list(range(np.min(seg+segNext),np.max(seg+segNext)+1))
+                    maskSegmentsJoin.append(segJoined)
+                else:
+                    maskSegmentsJoin.append(seg)
+                    if segNext == maskSegments[-1]:
+                        maskSegmentsJoin.append(segNext)
+        
+            maskSegments = maskSegmentsJoin
+
+
+    #find the largest mask segment -  assuming this corresponds to the spectral line of interest
+    maxLen = 0
+    maskFinal = np.zeros_like(maskComb)
+    for ss, seg in enumerate(maskSegments):
+        if allSeg:                              #keep all segments with narrowMask component
+            maskFinal[seg] = 1
+        else:
+            if len(seg) > maxLen:
+                maskFinal = np.zeros_like(maskComb)
+                maskFinal[seg] = 1
+                maxLen = len(seg)
+
+                # print(seg)
+            # while len(seg) > maxlen:
+            #     maxlen = len(seg)
+            #     if np.min(seg)-1>=0 and spectrumSN[np.min(seg)-1] > growSN:
+            #         seg = [np.min(seg)-1] + seg
+            #     if np.max(seg)+1<len(spectrumSN)-1 and spectrumSN[np.max(seg)+1] > growSN:
+            #         seg = seg + [np.max(seg)+1]
+             
+
+    #keep only positive values.. unsure if right yet. 
+    maskFinal[spectrumSN<0] = 0
+
+    if plot:
+        plt.figure()
+        plt.plot([broadSN]*len(spectrumSN),color='Red')
+        plt.plot(0.5*maskBroad*np.max(spectrumSN),color='Red')
+
+        plt.plot(spectrumSN,color='Grey')
+        plt.plot([narrowSN]*len(spectrumSN),color='Orange')
+        plt.plot(0.33*maskNarrow*np.max(spectrumSN),color='Orange',label='')
+
+        # plt.plot(0.3*maskComb*np.max(spectrumSN),color='Blue')
+        
+        plt.plot(spectrumSN*maskFinal,color='Black')
+        plt.plot(maskFinal*np.max(spectrumSN),ls='--',color='Magenta')
+        plt.show()
+
+    return maskFinal
 
 
 
+
+
+
+def makeLineMasks(spectrum, linLambda, lineLambdas, 
+        z = 0,
+        clipWidth = 1500, maskWidth = 500, baselineDeg = 2,
+        broadSN = 1.5, narrowSN = 3, growSN = 3,
+        segJoin = 0,allSeg=False,
+        plot=False):
+
+    linLambda = linLambda / (1+z)
+    logLambda = np.log(linLambda)
+
+    nLines = len(lineLambdas)
+    nLambda = spectrum.shape[0]
+
+
+    clipWidth /= (ac.c.value *1.e-3)     #km/s
+    maskWidth /= (ac.c.value *1.e-3)
+
+
+    # spectrum = convolve(spectrum,Box1DKernel(3))
+
+    outputs = []
+    for lineLambda in lineLambdas:
+
+        maskRange = np.where((logLambda > np.log(lineLambda*(1 - maskWidth)))  & 
+                            (logLambda < np.log(lineLambda*(1 + maskWidth))))[0]
+
+     
+        clipRange = np.where((logLambda > np.log(lineLambda*(1 - clipWidth)))  & 
+                            (logLambda < np.log(lineLambda*(1 + clipWidth))))[0] 
+     
+        clippedSpectrum = sigma_clip(spectrum[clipRange],2.5,maxiters=5)
+        
+        baselinePoly = npPoly.Polynomial.fit(linLambda[clipRange[~clippedSpectrum.mask]],
+                                                                clippedSpectrum[~clippedSpectrum.mask], 
+                                                                deg=baselineDeg)
+
+        clippedSpectrum = sigma_clip(spectrum[clipRange] - baselinePoly(linLambda[clipRange]), 2.5, maxiters=5)
+        specNoise = np.std(clippedSpectrum[~clippedSpectrum.mask])
+
+        maskSpectrum = spectrum[maskRange] - baselinePoly(linLambda[maskRange])
+
+        maskVel = (ac.c.value*1.e-3)*(logLambda[maskRange] - np.log(lineLambda))
+
+        spectrumSN = maskSpectrum / specNoise
+
+
+        maskFinal = makeThresholdMask(spectrumSN,narrowSN = narrowSN, broadSN=broadSN,growSN=growSN, segJoin=segJoin,allSeg=allSeg,plot=plot)
+
+                     
+        outputs.append([specNoise,maskFinal, maskVel, maskSpectrum])
+
+        if plot:
+            plt.figure()
+            plt.plot(maskVel,spectrum[maskRange])
+
+            plt.plot(maskVel,baselinePoly(linLambda[maskRange]))
+            plt.plot(maskVel,maskSpectrum*maskFinal)
+            plt.show()
+                     
+
+    return outputs
+                 
+        
+
+
+
+
+def baselineFunc(xx,aa,bb,cc):
+    yy = aa*xx**2 + bb*xx + cc
+    return yy
 
 
 
