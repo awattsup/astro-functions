@@ -452,20 +452,30 @@ def convert_RADEC_to_skyplane(pix_RADEC,header):
 
 	return pix_SP
 
-def deproject_pixel_coordinates(x0, y0, pix_xx, pix_yy, PA=0, incl=0, reverse = False):
+def convert_pixcoord_to_pixcoord(pix_xxyy,headerFrom,headerTo):
+
+	pix_RADEC = WCS(headerFrom).celestial.all_pix2world(pix_xxyy)
+	pix_xxyy_H2 = WCS(headerTo).celestial.all_world2pix(pix_RADEC)
+
+	return pix_xxyy_H2
+
+
+def deproject_pixel_coordinates(pix_xx, pix_yy, x0, y0, PA=0, incl=0, reverse = False):
 	#PA must be measured East of North!
 	#aligns PA to x-axis
 	#should all be in sky-plane pixel coordinates!
-	PA =  (90 - PA) * np.pi/180.
+	PA =  (PA-90) * np.pi/180.
 	incl = incl*np.pi/180.
 	
 	if not reverse:
+		# print(PA*180/np.pi)
 		#centre coordinates
 		pix_xx_sky = pix_xx - x0
 		pix_yy_sky = pix_yy - y0
 
 
-		pix_xx_sky = -pix_xx_sky			# this corrects the coordinate system to right-handed
+		# pix_xx_sky = -pix_xx_sky			# this corrects from right-handed sky plane to left-handed
+		# pix_yy_sky = -pix_yy_sky
 
 		#rotate to galaxy PA
 		pix_xx_gal = pix_xx_sky*np.cos(PA) - pix_yy_sky * np.sin(PA)
@@ -473,6 +483,7 @@ def deproject_pixel_coordinates(x0, y0, pix_xx, pix_yy, PA=0, incl=0, reverse = 
 
 		#incline y-axis
 		pix_yy_gal *= 1./np.cos(incl)
+		pix_xx_gal *= -1
 
 		pix_rr_gal = 3600*np.sqrt(pix_xx_gal**2.e0 + pix_yy_gal**2.e0)
 		
@@ -869,8 +880,6 @@ def median_absolute_deviation(array,Niter=1):
 
         MAD = np.nanmedian( np.abs(array - med) )
         MAD = 1.4826*MAD
-        print(MAD)
-
 
 
     return med, MAD
@@ -1522,10 +1531,6 @@ def makeThresholdMask(spectrumSN, narrowSN=3, broadSN=1.5, growSN = None,
     return maskFinal
 
 
-
-
-
-
 def makeLineMasks(spectrum, linLambda, lineLambdas, 
         z = 0,
         clipWidth = 1500, maskWidth = 500, baselineDeg = 2,
@@ -1588,8 +1593,64 @@ def makeLineMasks(spectrum, linLambda, lineLambdas,
 
     return outputs
                  
-        
 
+def measureAllLineMoments(maskInfo,moments = [0],noiseIter=None):
+	nLines = len(maskInfo)
+	lineMoments = []
+	for ll in range(nLines):
+		specNoise = maskInfo[ll][0]    
+		mask =  maskInfo[ll][1] 
+		vel  = maskInfo[ll][2]
+		spec = maskInfo[ll][3]
+
+		moments = measureLineMoments(spec, specNoise, vel, mask = mask, moments = moments,noiseIter = noiseIter)
+
+		lineMoments.append([specNoise] + moments)
+	return lineMoments
+
+
+def measureLineMoments(spectrum, specNoise, coordinate, mask = None, moments = [0],noiseIter = None): 
+
+	if isinstance(mask,type(None)):
+		mask = np.ones_like(spectrum)     
+
+	if np.any(mask==1):
+
+		if isinstance(noiseIter,int):
+			noiseArr = rng.normal(loc=0,scale=specNoise,size=(noiseIter,len(specNoise))).T
+		else:
+			noiseArr = None
+
+		moms = []
+		for mm in moments:
+			if mm == 0:
+				coord = np.full_like(coordinate,np.abs(np.diff(coordinate))[0])
+			else:
+				coord = coordinate
+			mom = weighted_moment(coord[mask.astype(bool)],weights=spectrum[mask.astype(bool)],moment=mm)
+			# else:
+			# 	coord = coordinate[mask.astype(bool)]
+			# 	mom = weighted_moment(coord,spectrum[mask.astype(bool)],moment=mm)
+			
+			if not isinstance(noiseArr,type(None)):
+				momDist = []
+				for nn in range(noiseIter):
+					momDist.extend([weighted_moment(coord,weights=(spectrum+noiseArr[:,nn])[mask.astype(bool)],moment=mm)])
+
+				sigmaMom = median_absolute_deviation(np.array(momDist),Niter=5)[1]
+			elif noiseIter == 'analytic':
+				if mm == 0:
+					sigmaMom = np.sqrt(np.nansum((specNoise*coord[mask.astype(bool)])**2))
+				else:
+					sigmaMom = np.nan
+			else:
+				sigmaMom = np.nan
+				
+			moms.extend([mom,sigmaMom])
+	else:
+		moms = [np.nan,np.nan]*len(moments)
+
+	return moms
 
 
 
@@ -1598,9 +1659,120 @@ def baselineFunc(xx,aa,bb,cc):
     return yy
 
 
+def extractLineMeasureOutputs(output):
+
+	moments = np.zeros([len(output),len(output[0][1]),len(output[0][1][0])])
+
+	maskSpecAll = []
+	velSpecAll = []
+	finalSpecAll = []
+
+	specAll = []
+
+	for ll in range(len(output[0][1])):
+
+		maskLine = []
+		velLine = []
+		specLine = []
+
+	
+		for ss in range(len(output)):
+			moments[ss,ll,:] = np.array(output[ss][1][ll][:]) 
+			maskLine.append(output[ss][0][ll][1])
+			velLine.append(output[ss][0][ll][2])
+			specLine.append(output[ss][0][ll][3])
+
+		# maskSpecAll.extend(np.array(maskLine))
+		# velSpecAll.extend(np.array(velLine))
+		# finalSpecAll.extend(np.array(specLine))
+		specAll.append([np.array(velLine),np.array(maskLine),np.array(specLine)])
+
+	return specAll,moments
 
 
+def plotMoments(moments,names,imgShape,nameExt = ''):
 
+	labels1  = ['M0: Jy/beam km/s']+[f'M{mm}: km/s' for mm in range(1,(moments.shape[2]-1)//2)]
+	labels2  = ['S/N']+[f'unc. M{mm}: km/s' for mm in range(1,(moments.shape[2]-1)//2)]
+
+
+	for ll in range(moments.shape[1]):
+
+		fig, ax = plt.subplots(2,(moments.shape[2]-1)//2)
+		fig.set_figheight(10)
+		fig.set_figwidth(4*len(ax[0]))
+
+		print((moments.shape[2]-1)//2)
+		for mm in range((moments.shape[2]-1)//2):
+
+			if mm==0:
+				vmin1=0
+				vmax1=np.percentile(moments[:,ll,1+2*mm][np.isfinite(moments[:,ll,1])],99)
+
+				vmin2=0
+				vmax2 = np.percentile((moments[:,ll,1+2*mm]/moments[:,ll,2*(mm+1)])[np.isfinite(moments[:,ll,1])],95)
+			elif mm==1:
+				med,MAD = median_absolute_deviation(moments[:,ll,1+2*mm],Niter=5)
+				moments[:,ll,1+2*mm] -= med
+				vmin1 = med-1.5*MAD
+				vmax1 = med+1.5*MAD
+
+				vmin2 = 0
+				vmax2 = np.percentile(moments[:,ll,2*(mm+1)][np.isfinite(moments[:,ll,1])],95)
+			elif mm == 2:	
+				vmin1 = 0
+				vmax1 = np.percentile(moments[:,ll,1+2*mm][np.isfinite(moments[:,ll,1])],50)
+
+				vmin2 = 0
+				vmax2 = np.percentile(moments[:,ll,2*(mm+1)][np.isfinite(moments[:,ll,1])],95)
+
+			else:
+				vmin1 = np.percentile(moments[:,ll,1+2*mm][np.isfinite(moments[:,ll,1])],5)
+				vmax1 = np.percentile(moments[:,ll,1+2*mm][np.isfinite(moments[:,ll,1])],95)
+				vmax1 = np.max([np.abs(vmin1),vmax1])
+				vmin1 = -vmax1
+
+				vmin2 = 0
+				vmax2 = np.percentile(moments[:,ll,2*(mm+1)][np.isfinite(moments[:,ll,1])],95)
+
+
+			img = ax[0,mm].imshow(moments[:,ll,1+2*mm].reshape(imgShape),cmap='viridis',vmin=vmin1,vmax=vmax1,origin='lower')
+			fig.colorbar(img,ax=ax[0,mm],orientation='horizontal',label=labels1[mm])
+
+			if mm == 0:
+				img2 = ax[1,mm].imshow((moments[:,ll,1+2*mm]/moments[:,ll,2*(mm+1)]).reshape(imgShape),
+		                 vmin=vmin2,vmax=vmax2,origin='lower')
+			else:
+				img2 = ax[1,mm].imshow(moments[:,ll,2*(mm+1)].reshape(imgShape),vmin=vmin2,vmax=vmax2,cmap='viridis',origin='lower')
+			
+
+			fig.colorbar(img2,ax=ax[1,mm],orientation='horizontal',label=labels2[mm])
+
+
+		fig.tight_layout()
+		fig.savefig(f"./figures/{names[ll][0].split('rms_')[-1]}_moment_maps{nameExt}.png")
+
+def saveMoments(moments, imgShape,names, header,outname="./moments.fits"):
+	
+	mapsHDU = fits.HDUList([fits.PrimaryHDU()])
+	for ll in range(moments.shape[1]):
+		for nn in range(len(names[0])):
+			mapsHDU.append(fits.ImageHDU(data=moments[:,ll,nn].reshape(imgShape),header=header,name=names[ll][nn]))
+	        
+	mapsHDU.writeto(outname,overwrite=True)
+
+
+def saveSubcubes(spectra,imgShape,header,outname="./subcubes.fits"):
+	cubesHDU = fits.HDUList([fits.PrimaryHDU()])
+
+	# subMask = subcubeSpectra[0][1].reshape(imgShape[1],imgShape[0],np.array(subcubeSpectra[0][0][0]).shape[0])
+	# subVel = subcubeSpectra[0][0].reshape(imgShape[1],imgShape[0],np.array(subcubeSpectra[0][0][0]).shape[0])
+	# subSpectra = subcubeSpectra[0][2].reshape(imgShape[1],imgShape[0],np.array(subcubeSpectra[0][0][0]).shape[0])
+	for ll in range(len(spectra)):
+		for nn in range(len(spectra[0])):
+			cubesHDU.append(fits.ImageHDU(data=np.swapaxes(spectra[ll][nn].reshape(imgShape[1],imgShape[0],np.array(spectra[0][0][0]).shape[0]),0,1).T,header=header))
+	        
+	cubesHDU.writeto(outname,overwrite=True)
 
 if __name__ == '__main__':
 	print('No main function bro')
