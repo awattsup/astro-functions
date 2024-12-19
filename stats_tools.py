@@ -340,13 +340,13 @@ def equal_contribution_histogram(data,bins, weights = None,stats=None,method = '
 
 
 
-
-
-def norm_gaussian(xx,mu,sigma):
+def gaussianPDF(xx,mu,sigma):
 	
 	prob = 1. / (sigma*np.sqrt(2.e0 * np.pi)) * \
 			np.exp(-0.5e0*( ((xx - mu) / sigma) *((xx - mu) / sigma) ))
 	return prob
+
+
 
 def fit_2d_gaussian(xx,yy,values,p0=None):
 	from scipy.optimize import curve_fit
