@@ -5,6 +5,8 @@ import astropy.constants as ac
 import astropy.units as au
 import scipy.stats as sps
 from scipy.stats import distributions
+import matplotlib.path as pltPath
+
 
 
 rng = np.random.default_rng()
@@ -390,12 +392,12 @@ def Gaussian_2d(data, A, x0, y0, theta, sigma_x, sigma_y):
 
 
 
-def inside_polygon(coordinates,poly_x,poly_y):
+def inside_polygon(xcoords,ycoords,poly_x,poly_y):
 	#borrowed/stolen from stack exchange: https://stackoverflow.com/questions/36399381/whats-the-fastest-way-of-checking-if-a-point-is-inside-a-polygon-in-python
 
 	path = pltPath.Path(np.array([poly_x,poly_y]).T)
 
-	inside = path.contains_points(coordinates)
+	inside = path.contains_points(np.array([xcoords,ycoords]).T)
 
 	return inside
 
