@@ -361,7 +361,6 @@ def convert_RADEC_to_skyplane(pix_RADEC,header):
 
     pix_SP = wcsprm.s2p(pix_RADEC,1)['imgcrd']
 
-
     return pix_SP
 
 def convert_pixcoord_to_pixcoord(pix_xxyy,headerFrom,headerTo):
@@ -623,9 +622,7 @@ def spectrumNoiseEstimate(spec, xaxis = None, baselineDeg = None, clip1=2, clip2
     if isinstance(xaxis,type(None)):
         xaxis = np.arange(len(spec))
 
-
     clippedSpectrum = sigma_clip(spec,clip1,maxiters=10)
-
     if isinstance(baselineDeg,int):    
         baselinePoly = npPoly.Polynomial.fit(xaxis[~clippedSpectrum.mask],
                                                 clippedSpectrum[~clippedSpectrum.mask], 
@@ -646,22 +643,25 @@ def spectrumNoiseEstimate(spec, xaxis = None, baselineDeg = None, clip1=2, clip2
     else:
         return specNoise
 
-def multiEmissionLinesFunction(linLambda,lineLambdas, coordType = 'spec', parameters = None):
+def multiEmissionLinesFunction(linLambda,lineLambdas, fluxcoordType = 'spec', parameters = None):
 
     V = parameters[0]
     sigma = parameters[1]
     lineFluxes = parameters[2:]
 
+    if isinstance(lineLambdas,float):
+        lineLambdas = np.array([lineLambdas])
+
     spectrum = np.zeros(len(linLambda))
 
     for lineLambda,lineFlux in zip(lineLambdas,lineFluxes):
 
-        if coordType == 'spec':
-            V_lambda = np.exp((1.e3*V/ac.c.value) + np.log(lineLambda))
+        if fluxcoordType == 'spec':
+            V_lambda = np.exp( (1.e3*V/ac.c.value) + np.log(lineLambda))
             sigma_lambda = 1.e3*sigma/ac.c.value * lineLambda
             spectrum += lineFlux*ST.gaussianPDF(linLambda,V_lambda,sigma_lambda)
 
-        elif coordType == 'vel':
+        elif fluxcoordType == 'vel':
             xx_kms = 1.e-3*ac.c.value * (np.log(linLambda) - np.log(lineLambda))
             spectrum += lineFlux*ST.gaussianPDF(xx_kms,V,sigma)
 
@@ -670,7 +670,7 @@ def multiEmissionLinesFunction(linLambda,lineLambdas, coordType = 'spec', parame
 def detectEmissionLines_fit(spectrum, linLambda, lineLambdas, 
                                 z = 0,
                                 clipWidth = 2000, maskWidth = 500, baselineDeg = 2,
-                                coordType = 'spec',
+                                fluxcoordType = 'spec',specNum = None,
                                 plot=False):
 
     linLambda = linLambda / (1+z)
@@ -689,61 +689,111 @@ def detectEmissionLines_fit(spectrum, linLambda, lineLambdas,
     maskVel_all = []
     dLambda_all = np.array([])
     dV_all = np.array([])
+    p0Flux_all = []
+    p0Vel_all = []
+
 
 
     for lineLambda in lineLambdas:
-
+        # print(lineLambda)
         maskRange = np.where((logLambda > np.log(lineLambda*(1 - maskWidth)))  & 
                             (logLambda < np.log(lineLambda*(1 + maskWidth))))[0]
 
         clipRange = np.where((logLambda > np.log(lineLambda*(1 - clipWidth)))  & 
                             (logLambda < np.log(lineLambda*(1 + clipWidth))))[0] 
-     
-        specNoise, baselinePoly = spectrumNoiseEstimate(spectrum[clipRange],
-                                                        xaxis = linLambda[clipRange],
-                                                        baselineDeg = baselineDeg,
-                                                        returnBaseline = True)
 
-        maskSpectrum = spectrum[maskRange] - baselinePoly(linLambda[maskRange])
         maskVel = (ac.c.value*1.e-3)*(logLambda[maskRange] - np.log(lineLambda))
-
 
         dLambda = np.abs(np.nanmedian(np.diff(linLambda[maskRange])))
         dv = 1.e-3*ac.c.value* (np.median(np.abs(np.diff(logLambda[maskRange]))))
 
-        specNoise_all = np.hstack([specNoise_all,specNoise])
-        linLambda_all.append(linLambda[maskRange])
-        maskSpectrum_all.append(maskSpectrum)
-        maskVel_all.append(maskVel)
-        dV_all = np.hstack([dV_all, dv])
-        dLambda_all = np.hstack([dLambda_all,dLambda])
+        if np.all(np.isfinite(spectrum[clipRange])):
+
+            specNoise, baselinePoly = spectrumNoiseEstimate(spectrum[clipRange],
+                                                            xaxis = linLambda[clipRange],
+                                                            baselineDeg = baselineDeg,
+                                                            returnBaseline = True)
+
+            maskSpectrum = spectrum[maskRange] - baselinePoly(linLambda[maskRange])
+            
+            specNoise_all = np.hstack([specNoise_all,specNoise])
+            linLambda_all.append(linLambda[maskRange])
+            dV_all = np.hstack([dV_all, dv])
+            dLambda_all = np.hstack([dLambda_all,dLambda])
+
+
+
+            if np.any(maskSpectrum/specNoise >3):
+
+                maskSpectrum_all.append(maskSpectrum)
+                maskVel_all.append(maskVel)
+                p0Flux_all.extend([np.nanmax(maskSpectrum)])
+                p0Vel_all.extend([maskVel[np.nanargmax(maskSpectrum)]])
+            else:
+                maskSpectrum_all.append(np.full_like(spectrum[maskRange],0))
+                maskVel_all.append(np.full_like(spectrum[maskRange],np.nan))
+                p0Flux_all.extend([0])
+                p0Vel_all.extend([0])
+
+
+        else:
+            specNoise_all = np.hstack([specNoise_all,np.nan])
+            linLambda_all.append(linLambda[maskRange])
+            maskSpectrum_all.append(np.full_like(spectrum[maskRange],np.nan))
+            maskVel_all.append(np.full_like(spectrum[maskRange],np.nan))
+            dV_all = np.hstack([dV_all, dv])
+            dLambda_all = np.hstack([dLambda_all,dLambda])
+            p0Flux_all.extend([0])
+            p0Vel_all.extend([0])
 
     multiLineFunc = lambda ll,params: multiEmissionLinesFunction(ll,lineLambdas, 
-                                                                coordType = coordType, parameters = params)
+                                                                fluxcoordType = fluxcoordType, parameters = params)
 
-    residualFunc = lambda params,xdata,ydata: multiLineFunc(xdata,params) - ydata
+    residualFunc = lambda params,xdata,ydata: (multiLineFunc(xdata,params) - ydata)[np.isfinite(multiLineFunc(xdata,params) - ydata)]
 
-    p0 = [0,20]+[10]*len(lineLambdas)
+
+    # if not np.all(p0Flux_all == 0)
+    p0Vel = p0Vel_all[np.nanargmax(p0Flux_all)]
+    p0 = [p0Vel,10]+p0Flux_all
     bL = [-500,0] + [0]*len(lineLambdas)
     bU = [500,200] + [np.inf]*len(lineLambdas)
 
-    emlinesFit = least_squares(residualFunc,x0=p0, bounds=(bL,bU),verbose=0,args = (np.hstack(linLambda_all), np.hstack(maskSpectrum_all)))
 
-    lineKin = emlinesFit.x[:2]
-    lineFluxes = emlinesFit.x[2:]
-    FWHMs_Nchan = 2*2.355*emlinesFit.x[1] / dV_all #*np.array(lineLambdas)*(emlinesFit.x[1]/(1.e-3*ac.c.value))
-    if coordType == 'spec':
-        lineFluxes_unc = specNoise_all * np.sqrt(FWHMs_Nchan) * dLambda_all
-    elif coordType == 'vel':
-        lineFluxes_unc = specNoise_all * np.sqrt(FWHMs_Nchan) * dV_all
+    # emlinesFit = least_squares(residualFunc,x0=p0, bounds=(bL,bU),verbose=0,xtol = 1.e-2,
+    #                             args = (np.hstack(linLambda_all), np.hstack(maskSpectrum_all)))
+    try:
+        emlinesFit = least_squares(residualFunc,x0=p0, bounds=(bL,bU),verbose=0,
+                                args = (np.hstack(linLambda_all), np.hstack(maskSpectrum_all)))
+
+        lineKin = emlinesFit.x[:2]
+        lineFluxes = emlinesFit.x[2:]
+        FWHMs_Nchan = 2*2.355*emlinesFit.x[1] / dV_all #*np.array(lineLambdas)*(emlinesFit.x[1]/(1.e-3*ac.c.value))
+        if fluxcoordType == 'spec':
+            lineFluxes_unc = specNoise_all * np.sqrt(FWHMs_Nchan) * dLambda_all
+        elif fluxcoordType == 'vel':
+            lineFluxes_unc = specNoise_all * np.sqrt(FWHMs_Nchan) * dV_all
 
 
-    lineMoments = [[specNoise_all[ll],lineFluxes[ll],lineKin[0],lineKin[1],lineFluxes_unc[ll],0,0] for ll in range(nLines)]
+        lineMoments = [[specNoise_all[ll],lineFluxes[ll],lineKin[0],lineKin[1],lineFluxes_unc[ll],0,0] for ll in range(nLines)]
+        output = [specNoise_all,
+            np.array([linLambda_all,maskSpectrum_all,
+                        [multiEmissionLinesFunction(linLambda_all[ll],
+                                                    lineLambdas[ll], 
+                                                    fluxcoordType = fluxcoordType, 
+                                                    parameters = emlinesFit.x[[0,1,ll+2]]) for ll in range(nLines)],
+                        maskVel_all],
+                        dtype='object'),
+                        np.array(lineMoments)]
+    except:
+        lineMoments = [[specNoise_all[ll],0.5*specNoise_all[ll],np.nan,np.nan,specNoise_all[ll],np.nan,np.nan] for ll in range(nLines)]
 
 
-    output = [specNoise_all,
-            np.array([linLambda_all,maskSpectrum_all,[multiLineFunc(ll,emlinesFit.x) for ll in linLambda_all],maskVel_all],dtype='object'),
-             np.array(lineMoments)]
+        output = [specNoise_all,
+            np.array([linLambda_all,maskSpectrum_all,
+                        [np.zeros_like(linLambda_all[ll]) for ll in range(nLines)],
+                        maskVel_all],
+                        dtype='object'),
+                        np.array(lineMoments)]
                      
 
     return output
@@ -1072,7 +1122,10 @@ def extractLineMeasurements(output, type='mask'):
     return allSpectra,moments
 
 
-def plotMoments(moments,names,imgShape,nameExt = ''):
+def plotMoments(moments,names,imgShape,pixNums = None,nameExt = ''):
+
+    if isinstance(pixNums,type(None)):
+        pixNums = np.arange(moments.shape[0],dtype=int)
 
     nLines = moments.shape[1]
     nMoments = (moments.shape[2]-1)//2
@@ -1121,14 +1174,19 @@ def plotMoments(moments,names,imgShape,nameExt = ''):
                 vmax2 = np.percentile(moments[:,ll,1+nMoments+mm][np.isfinite(moments[:,ll,1])],95)
 
 
-            img = ax[0,mm].imshow(moments[:,ll,1+mm].reshape(imgShape),cmap='viridis',vmin=vmin1,vmax=vmax1,origin='lower')
+            momentImage1 = np.full(imgShape,np.nan).flatten()
+            momentImage2 = np.full(imgShape,np.nan).flatten()
+            momentImage1[pixNums] = moments[:,ll,1+mm]
+            momentImage2[pixNums] = moments[:,ll,1+nMoments+mm]
+
+            img = ax[0,mm].imshow(momentImage1.reshape(imgShape),cmap='viridis',vmin=vmin1,vmax=vmax1,origin='lower')
             fig.colorbar(img,ax=ax[0,mm],orientation='horizontal',label=labels1[mm])
 
             if mm == 0:
-                img2 = ax[1,mm].imshow((moments[:,ll,1+mm]/moments[:,ll,1+nMoments+mm]).reshape(imgShape),
+                img2 = ax[1,mm].imshow((momentImage1/momentImage2).reshape(imgShape),
                          vmin=vmin2,vmax=vmax2,origin='lower')
             else:
-                img2 = ax[1,mm].imshow(moments[:,ll,1+nMoments+mm].reshape(imgShape),vmin=vmin2,vmax=vmax2,cmap='viridis',origin='lower')
+                img2 = ax[1,mm].imshow(momentImage2.reshape(imgShape),vmin=vmin2,vmax=vmax2,cmap='viridis',origin='lower')
             
 
             fig.colorbar(img2,ax=ax[1,mm],orientation='horizontal',label=labels2[mm])
@@ -1137,18 +1195,28 @@ def plotMoments(moments,names,imgShape,nameExt = ''):
         fig.tight_layout()
         fig.savefig(f"./figures/{names[ll][0].split('rms_')[-1]}_moment_maps{nameExt}.png")
 
-def saveMoments(moments, imgShape,names, header,outname="./moments.fits"):
+def saveMoments(moments, imgShape,names, header,pixNums = None,outname="./moments.fits"):
     
+    if isinstance(pixNums,type(None)):
+        pixNums = np.arange(moments.shape[0],dtype=int)
+
+
     mapsHDU = fits.HDUList([fits.PrimaryHDU()])
     for ll in range(moments.shape[1]):
         for nn in range(len(names[0])):
-            mapsHDU.append(fits.ImageHDU(data=moments[:,ll,nn].reshape(imgShape),header=header,name=names[ll][nn]))
+            momentImage= np.full(imgShape,np.nan).flatten()
+            momentImage[pixNums] = moments[:,ll,nn]
+
+            mapsHDU.append(fits.ImageHDU(data=momentImage.reshape(imgShape),header=header,name=names[ll][nn]))
             
     mapsHDU.writeto(outname,overwrite=True)
 
 
-def saveSubcubes(spectra,imgShape,names = None,outname="./subcubes.fits"):
+def saveSubcubes(spectra,imgShape,pixNums = None,names = None,outname="./subcubes.fits"):
     cubesHDU = fits.HDUList([fits.PrimaryHDU()])
+    if isinstance(pixNums,type(None)):
+        pixNums = np.arange(imgShape[1]*imgShape[0],dtype=int)
+
 
     nLines = len(spectra)
 
@@ -1161,15 +1229,24 @@ def saveSubcubes(spectra,imgShape,names = None,outname="./subcubes.fits"):
     for ll in range(nLines):
         subcubeLambda = spectra[ll][0]
         subcubeVel = spectra[ll][3]
-        subcubeSpec1 = spectra[ll][1]
-        subcubeSpec2 = spectra[ll][2]
+        # subcubeSpec1 = 
+        # subcubeSpec2 = spectra[ll][2]
 
-        print(np.asarray(subcubeLambda,dtype=float).dtype)
+        nChannels = len(subcubeLambda)
+        cubeShape = (len(subcubeLambda),imgShape[1],imgShape[0])
+
+        subcube1 = np.full([nChannels, imgShape[1]*imgShape[0]],np.nan)
+        subcube2 = np.full([nChannels, imgShape[1]*imgShape[0]],np.nan)
+
+        subcube1[:,pixNums] = spectra[ll][1]
+        subcube2[:,pixNums] = spectra[ll][2]
+
+        # print(np.asarray(subcubeLambda,dtype=float).dtype)
 
         cubesHDU.append(fits.ImageHDU(data=np.asarray(subcubeLambda,dtype=float),name=f'{names[ll]}-lambda'))
         cubesHDU.append(fits.ImageHDU(data=np.asarray(subcubeVel,dtype=float),name=f'{names[ll]}-vel'))
-        cubesHDU.append(fits.ImageHDU(data=subcubeSpec1.reshape((len(subcubeLambda),imgShape[1],imgShape[0]))))
-        cubesHDU.append(fits.ImageHDU(data=subcubeSpec2.reshape((len(subcubeLambda),imgShape[1],imgShape[0]))))
+        cubesHDU.append(fits.ImageHDU(data=subcube1.reshape(cubeShape)))
+        cubesHDU.append(fits.ImageHDU(data=subcube2.reshape(cubeShape)))
 
         # for nn in range(len(spectra[0])):
         #     cubesHDU.append(fits.ImageHDU(data=np.swapaxes(spectra[ll][nn].reshape(imgShape[1],imgShape[0],np.array(spectra[0][0][0]).shape[0]),0,1).T,header=header))
